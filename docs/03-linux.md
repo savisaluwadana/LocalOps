@@ -1,319 +1,489 @@
-# Linux Fundamentals
+# Linux In-Depth Theory
 
-## What is Linux?
+## Operating System Architecture
 
-Linux is an **open-source operating system kernel** created by Linus Torvalds in 1991. Unlike Windows or macOS, "Linux" technically refers only to the kernel—the core component that manages hardware, memory, and processes. What we commonly call "Linux" is actually a **Linux distribution** (distro), which bundles the kernel with system utilities, package managers, and desktop environments.
+### The Kernel
 
-### Why Linux for DevOps?
-
-| Reason | Explanation |
-|--------|-------------|
-| **Server Dominance** | 96%+ of the world's top servers run Linux |
-| **Container Foundation** | Docker, Kubernetes, and most containers are Linux-based |
-| **Scripting Power** | Bash scripting automates everything |
-| **SSH Everywhere** | Remote server management is Linux-native |
-| **Free & Open Source** | No licensing costs, full customization |
-
----
-
-## Core Concepts
-
-### 1. The Filesystem Hierarchy
-
-Linux uses a **single unified filesystem** starting from `/` (root), unlike Windows which uses drive letters.
+The **kernel** is the core of Linux, responsible for managing all system resources.
 
 ```
-/
-├── bin/        → Essential user binaries (ls, cp, mv)
-├── boot/       → Boot loader files
-├── dev/        → Device files (disks, terminals)
-├── etc/        → System configuration files
-├── home/       → User home directories (/home/ubuntu)
-├── lib/        → Shared libraries
-├── opt/        → Optional/third-party software
-├── proc/       → Virtual filesystem for process info
-├── root/       → Root user's home directory
-├── tmp/        → Temporary files
-├── usr/        → User programs and data
-│   ├── bin/    → Non-essential user binaries
-│   ├── lib/    → Libraries for /usr/bin
-│   └── local/  → Locally installed software
-└── var/        → Variable data (logs, databases)
-    └── log/    → System logs
+┌─────────────────────────────────────────────────────────────────┐
+│                        USER SPACE                                │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────────┐  │
+│  │ Applications│  │   Shells    │  │      System Services    │  │
+│  │ (nginx,java)│  │ (bash,zsh)  │  │    (systemd, cron)      │  │
+│  └─────────────┘  └─────────────┘  └─────────────────────────┘  │
+├─────────────────────────────────────────────────────────────────┤
+│                    SYSTEM CALL INTERFACE                         │
+├─────────────────────────────────────────────────────────────────┤
+│                        KERNEL SPACE                              │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────────┐  │
+│  │   Process   │  │   Memory    │  │      File System        │  │
+│  │ Management  │  │ Management  │  │      (ext4, xfs)        │  │
+│  └─────────────┘  └─────────────┘  └─────────────────────────┘  │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────────┐  │
+│  │  Network    │  │   Device    │  │      Security           │  │
+│  │   Stack     │  │  Drivers    │  │      (SELinux)          │  │
+│  └─────────────┘  └─────────────┘  └─────────────────────────┘  │
+├─────────────────────────────────────────────────────────────────┤
+│                         HARDWARE                                 │
+│    CPU    │    RAM    │    Disk    │    Network    │   GPU      │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
-### 2. Users and Permissions
+### Process Management
 
-Linux is a **multi-user system**. Every file has:
-- An **owner** (user)
-- A **group**
-- Permissions for **owner**, **group**, and **others**
+Every program in Linux runs as a **process**. The kernel manages:
+- **Process creation** (fork, exec)
+- **Scheduling** (which process runs when)
+- **Inter-process communication** (pipes, signals, shared memory)
+- **Process termination**
+
+**Process States:**
+```
+┌──────────────┐
+│   Created    │
+└──────┬───────┘
+       │
+       ▼
+┌──────────────┐     wait for I/O    ┌──────────────┐
+│   Running    │◄───────────────────►│   Waiting    │
+└──────┬───────┘                     └──────────────┘
+       │
+       ▼
+┌──────────────┐     wait for parent ┌──────────────┐
+│  Terminated  │◄───────────────────►│   Zombie     │
+└──────────────┘                     └──────────────┘
+```
+
+**Example: Process hierarchy**
+```bash
+# View process tree
+pstree -p
+
+# Output shows parent-child relationships:
+# systemd(1)─┬─sshd(1234)───sshd(5678)───bash(9012)───vim(3456)
+#            ├─nginx(2345)─┬─nginx(2346)
+#            │             └─nginx(2347)
+#            └─docker(7890)
+```
+
+### Memory Management
+
+Linux uses **virtual memory** to give each process the illusion of having its own address space.
+
+**Key concepts:**
+- **Pages**: 4KB chunks of memory
+- **Page Table**: Maps virtual to physical addresses
+- **Swap**: Disk space used when RAM is full
+- **OOM Killer**: Terminates processes when memory is exhausted
 
 ```bash
-# View permissions
-ls -la
-
-# Output: -rwxr-xr--
-# Breakdown:
-# - = file type (d for directory)
-# rwx = owner can read, write, execute
-# r-x = group can read and execute
-# r-- = others can only read
-```
-
-**Numeric Permissions:**
-- `r` = 4, `w` = 2, `x` = 1
-- `chmod 755` = rwxr-xr-x (common for scripts)
-- `chmod 644` = rw-r--r-- (common for files)
-
-### 3. Processes and Services
-
-A **process** is a running program. A **service** (daemon) is a background process.
-
-```bash
-# View running processes
-ps aux
-
-# View resource usage
-top
-htop  # Better version (may need installation)
-
-# Manage services (systemd)
-sudo systemctl status nginx
-sudo systemctl start nginx
-sudo systemctl enable nginx  # Start on boot
-```
-
-### 4. Package Management
-
-Different distros use different package managers:
-
-| Distro | Package Manager | Example |
-|--------|-----------------|---------|
-| Ubuntu/Debian | apt | `sudo apt install nginx` |
-| RHEL/CentOS | yum/dnf | `sudo dnf install nginx` |
-| Alpine | apk | `apk add nginx` |
-| Arch | pacman | `sudo pacman -S nginx` |
-
----
-
-## Essential Commands
-
-### Navigation & Files
-
-```bash
-# Where am I?
-pwd
-
-# List files
-ls -la                    # Long format, show hidden
-ls -lah                   # Human-readable sizes
-
-# Change directory
-cd /var/log               # Absolute path
-cd ..                     # Up one level
-cd ~                      # Home directory
-cd -                      # Previous directory
-
-# Create/Remove
-mkdir -p /path/to/dir     # Create nested directories
-touch file.txt            # Create empty file
-rm file.txt               # Delete file
-rm -rf directory/         # Delete directory recursively (DANGEROUS)
-
-# Copy/Move
-cp source dest
-cp -r source_dir dest_dir # Copy directory
-mv old_name new_name      # Rename or move
-```
-
-### File Content
-
-```bash
-# View files
-cat file.txt              # Print entire file
-less file.txt             # Paginated view (q to quit)
-head -n 20 file.txt       # First 20 lines
-tail -n 20 file.txt       # Last 20 lines
-tail -f /var/log/syslog   # Follow log in real-time
-
-# Search
-grep "error" file.txt             # Find lines with "error"
-grep -r "pattern" /path/          # Recursive search
-grep -i "pattern" file.txt        # Case insensitive
-
-# Edit
-nano file.txt             # Simple editor
-vim file.txt              # Powerful editor (steep learning curve)
-```
-
-### Networking
-
-```bash
-# Check IP address
-ip addr
-hostname -I
-
-# Test connectivity
-ping google.com
-curl -I https://example.com   # HTTP headers only
-curl https://api.example.com  # Full response
-
-# Check open ports
-ss -tuln                  # What's listening
-netstat -tuln             # Legacy alternative
-
-# Download files
-wget https://example.com/file.zip
-curl -O https://example.com/file.zip
-```
-
-### System Information
-
-```bash
-# OS info
-cat /etc/os-release
-uname -a
-
-# Disk usage
-df -h                     # Filesystem usage
-du -sh /path/             # Directory size
-
-# Memory
+# View memory usage
 free -h
+#               total        used        free      shared  buff/cache   available
+# Mem:           16Gi       4.2Gi       8.1Gi       312Mi       3.7Gi        11Gi
+# Swap:         4.0Gi          0B       4.0Gi
 
-# CPU
-lscpu
-cat /proc/cpuinfo
+# Check what's using memory
+ps aux --sort=-%mem | head -10
+
+# View /proc for detailed info
+cat /proc/meminfo
 ```
 
 ---
 
-## Hands-On Lab
+## File System Deep Dive
 
-### Exercise 1: Basic Navigation (10 mins)
+### Inodes and File Storage
+
+Every file in Linux has an **inode** containing metadata:
+- File size
+- Owner/group
+- Permissions
+- Timestamps (created, modified, accessed)
+- Pointers to data blocks
 
 ```bash
-# 1. Create your project structure
-mkdir -p ~/projects/myapp/{src,config,logs}
+# View inode information
+ls -i file.txt
+stat file.txt
 
-# 2. Navigate into it
-cd ~/projects/myapp
-
-# 3. Create some files
-touch src/app.py config/settings.yaml
-echo "Hello World" > logs/app.log
-
-# 4. Verify structure
-find . -type f
-
-# 5. Check permissions
-ls -la src/
+# Output:
+#   File: file.txt
+#   Size: 1234       Blocks: 8          IO Block: 4096   regular file
+# Device: 803h/2051d Inode: 789456      Links: 1
+# Access: (0644/-rw-r--r--)  Uid: ( 1000/   user)   Gid: ( 1000/   user)
+# Access: 2024-01-15 10:30:00.000000000 +0000
+# Modify: 2024-01-15 09:15:00.000000000 +0000
+# Change: 2024-01-15 09:15:00.000000000 +0000
 ```
 
-### Exercise 2: User Management (15 mins)
+### Hard Links vs Symbolic Links
 
+**Hard Link**: Another name pointing to the same inode
 ```bash
-# 1. Create a new user
-sudo useradd -m -s /bin/bash devuser
-
-# 2. Set password
-sudo passwd devuser
-
-# 3. Add to sudo group (Ubuntu/Debian)
-sudo usermod -aG sudo devuser
-
-# 4. Switch to new user
-su - devuser
-
-# 5. Verify groups
-groups
-
-# 6. Return to original user
-exit
+ln original.txt hardlink.txt
+ls -li  # Same inode number
 ```
 
-### Exercise 3: Service Management (15 mins)
-
+**Symbolic Link**: A file that points to another file's path
 ```bash
-# 1. Install nginx
-sudo apt update && sudo apt install -y nginx
+ln -s /path/to/original.txt symlink.txt
+ls -l  # Shows symlink -> original.txt
+```
 
-# 2. Check status
-sudo systemctl status nginx
+**Diagram:**
+```
+Hard Links:                    Symbolic Links:
+┌─────────────┐               ┌─────────────┐
+│ file.txt    │───┐   ┌───────│ actual.txt  │
+└─────────────┘   │   │       └─────────────┘
+                  ▼   │              ▲
+              ┌───────┴───┐         │
+              │  Inode    │   ┌─────┴─────────┐
+              │  (data)   │   │ link.txt      │
+              └───────────┘   │ -> actual.txt │
+┌─────────────┐   ▲           └───────────────┘
+│ hardlink.txt│───┘
+└─────────────┘
+```
 
-# 3. View the web page
-curl localhost
+### File Descriptors
 
-# 4. Stop the service
-sudo systemctl stop nginx
+Every open file is represented by a **file descriptor** (integer).
 
-# 5. Verify it's stopped
-curl localhost  # Should fail
+| FD | Meaning |
+|----|---------|
+| 0 | stdin (standard input) |
+| 1 | stdout (standard output) |
+| 2 | stderr (standard error) |
 
-# 6. Start again and enable on boot
-sudo systemctl start nginx
-sudo systemctl enable nginx
+**Redirection examples:**
+```bash
+# Redirect stdout to file
+command > output.txt
+
+# Redirect stderr to file
+command 2> errors.txt
+
+# Redirect both to same file
+command > all.txt 2>&1
+
+# Redirect both (modern syntax)
+command &> all.txt
+
+# Append instead of overwrite
+command >> output.txt
+
+# Pipe stdout to another command
+command1 | command2
+
+# Discard output
+command > /dev/null 2>&1
 ```
 
 ---
 
-## Bash Scripting Basics
+## Networking Deep Dive
 
-### Your First Script
+### TCP/IP Stack
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    APPLICATION LAYER                             │
+│           HTTP, HTTPS, SSH, DNS, SMTP, FTP                       │
+├─────────────────────────────────────────────────────────────────┤
+│                    TRANSPORT LAYER                               │
+│                   TCP (reliable), UDP (fast)                     │
+├─────────────────────────────────────────────────────────────────┤
+│                    NETWORK LAYER                                 │
+│                   IP addressing, routing                         │
+├─────────────────────────────────────────────────────────────────┤
+│                    DATA LINK LAYER                               │
+│                   Ethernet, MAC addresses                        │
+├─────────────────────────────────────────────────────────────────┤
+│                    PHYSICAL LAYER                                │
+│              Cables, signals, wireless                           │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### IP Addressing
+
+**IPv4:** 32-bit (e.g., 192.168.1.100)
+**IPv6:** 128-bit (e.g., 2001:0db8:85a3::8a2e:0370:7334)
+
+**CIDR Notation:**
+```
+192.168.1.0/24 = 256 addresses (192.168.1.0 - 192.168.1.255)
+10.0.0.0/8 = 16,777,216 addresses
+172.16.0.0/16 = 65,536 addresses
+```
+
+**Private IP Ranges:**
+| Range | Usage |
+|-------|-------|
+| 10.0.0.0/8 | Large organizations |
+| 172.16.0.0/12 | Medium organizations |
+| 192.168.0.0/16 | Home/small networks |
+
+### Network Commands in Practice
+
+```bash
+# View all network interfaces
+ip addr show
+
+# Add an IP address
+sudo ip addr add 192.168.1.50/24 dev eth0
+
+# View routing table
+ip route show
+# default via 192.168.1.1 dev eth0
+# 192.168.1.0/24 dev eth0 proto kernel scope link src 192.168.1.100
+
+# Add a route
+sudo ip route add 10.0.0.0/8 via 192.168.1.1
+
+# DNS lookup
+dig google.com
+nslookup google.com
+
+# Trace route
+traceroute google.com
+
+# Check what's listening
+ss -tuln
+netstat -tuln
+
+# Network connections
+ss -tp  # TCP connections with process info
+```
+
+### iptables Firewall
+
+**Chain flow:**
+```
+Incoming Packet → PREROUTING → INPUT → Application
+                      ↓
+                  FORWARD → POSTROUTING → Outgoing
+                      ↑
+Application → OUTPUT ─┘
+```
+
+**Examples:**
+```bash
+# List rules
+sudo iptables -L -n -v
+
+# Allow SSH
+sudo iptables -A INPUT -p tcp --dport 22 -j ACCEPT
+
+# Allow established connections
+sudo iptables -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
+
+# Drop all other incoming
+sudo iptables -A INPUT -j DROP
+
+# NAT (for containers/VMs)
+sudo iptables -t nat -A POSTROUTING -o eth0 -j MASQUERADE
+```
+
+---
+
+## Advanced Bash Scripting
+
+### Arrays
+
+```bash
+# Indexed array
+fruits=("apple" "banana" "cherry")
+echo ${fruits[0]}       # apple
+echo ${fruits[@]}       # all elements
+echo ${#fruits[@]}      # length (3)
+
+# Associative array (dictionary)
+declare -A users
+users[john]="admin"
+users[jane]="developer"
+echo ${users[john]}     # admin
+echo ${!users[@]}       # all keys
+```
+
+### Functions
 
 ```bash
 #!/bin/bash
-# my_script.sh - A simple backup script
 
-# Variables
-SOURCE="/home/ubuntu/projects"
-BACKUP="/var/backups"
-TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+# Function with return value
+get_status() {
+    local service=$1
+    if systemctl is-active --quiet "$service"; then
+        return 0  # Success
+    else
+        return 1  # Failure
+    fi
+}
 
-# Create backup
-tar -czf "$BACKUP/backup_$TIMESTAMP.tar.gz" "$SOURCE"
+# Function with output
+deploy_app() {
+    local app_name=$1
+    local version=$2
+    
+    echo "Deploying $app_name version $version..."
+    # Deployment logic here
+    echo "$app_name deployed successfully"
+}
 
-# Report
-echo "Backup created: backup_$TIMESTAMP.tar.gz"
-```
-
-Make it executable and run:
-```bash
-chmod +x my_script.sh
-./my_script.sh
-```
-
-### Control Structures
-
-```bash
-#!/bin/bash
-
-# If statement
-if [ -f "/path/to/file" ]; then
-    echo "File exists"
+# Usage
+if get_status nginx; then
+    echo "nginx is running"
 else
-    echo "File not found"
+    echo "nginx is NOT running"
 fi
 
-# For loop
-for server in web1 web2 web3; do
-    echo "Deploying to $server..."
-    # ssh $server "deploy command here"
-done
-
-# While loop
-counter=0
-while [ $counter -lt 5 ]; do
-    echo "Count: $counter"
-    ((counter++))
-done
+result=$(deploy_app "myapp" "v1.2.3")
+echo "$result"
 ```
 
----
+### Error Handling
 
-## Further Learning
+```bash
+#!/bin/bash
+set -euo pipefail  # Exit on error, undefined var, pipe failure
 
-1. **Practice**: Use [OverTheWire Bandit](https://overthewire.org/wargames/bandit/) for Linux challenges
-2. **Book**: "The Linux Command Line" by William Shotts (free online)
-3. **Certification**: Consider LFCS (Linux Foundation Certified System Admin)
+# Trap errors
+trap 'echo "Error on line $LINENO"' ERR
+
+# Trap cleanup on exit
+cleanup() {
+    echo "Cleaning up..."
+    rm -f /tmp/tempfile
+}
+trap cleanup EXIT
+
+# Try-catch pattern
+{
+    risky_command
+} || {
+    echo "risky_command failed, handling error..."
+    exit 1
+}
+
+# Check command success
+if ! cp source dest; then
+    echo "Copy failed"
+    exit 1
+fi
+```
+
+### Practical Script: Deployment
+
+```bash
+#!/bin/bash
+set -euo pipefail
+
+# Configuration
+APP_NAME="${APP_NAME:-myapp}"
+DEPLOY_DIR="/var/www/${APP_NAME}"
+BACKUP_DIR="/var/backups/${APP_NAME}"
+LOG_FILE="/var/log/${APP_NAME}-deploy.log"
+
+# Logging function
+log() {
+    local level=$1
+    shift
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] [$level] $*" | tee -a "$LOG_FILE"
+}
+
+# Check prerequisites
+check_prereqs() {
+    log INFO "Checking prerequisites..."
+    
+    for cmd in docker rsync; do
+        if ! command -v $cmd &> /dev/null; then
+            log ERROR "Required command not found: $cmd"
+            exit 1
+        fi
+    done
+    
+    log INFO "Prerequisites OK"
+}
+
+# Backup current version
+backup() {
+    log INFO "Creating backup..."
+    local timestamp=$(date +%Y%m%d_%H%M%S)
+    local backup_path="${BACKUP_DIR}/${timestamp}"
+    
+    mkdir -p "$backup_path"
+    if [[ -d "$DEPLOY_DIR" ]]; then
+        rsync -av "$DEPLOY_DIR/" "$backup_path/"
+        log INFO "Backup created at $backup_path"
+    else
+        log WARN "Nothing to backup"
+    fi
+}
+
+# Deploy new version
+deploy() {
+    local version=$1
+    log INFO "Deploying version $version..."
+    
+    # Pull container
+    docker pull "${APP_NAME}:${version}"
+    
+    # Stop old container
+    docker stop "$APP_NAME" 2>/dev/null || true
+    docker rm "$APP_NAME" 2>/dev/null || true
+    
+    # Start new container
+    docker run -d \
+        --name "$APP_NAME" \
+        --restart unless-stopped \
+        -p 8080:8080 \
+        "${APP_NAME}:${version}"
+    
+    log INFO "Container started"
+}
+
+# Health check
+health_check() {
+    log INFO "Running health check..."
+    local max_attempts=30
+    local attempt=1
+    
+    while [[ $attempt -le $max_attempts ]]; do
+        if curl -sf http://localhost:8080/health > /dev/null; then
+            log INFO "Health check passed"
+            return 0
+        fi
+        log WARN "Health check attempt $attempt/$max_attempts failed"
+        ((attempt++))
+        sleep 2
+    done
+    
+    log ERROR "Health check failed after $max_attempts attempts"
+    return 1
+}
+
+# Main
+main() {
+    local version=${1:-latest}
+    
+    log INFO "Starting deployment of $APP_NAME:$version"
+    
+    check_prereqs
+    backup
+    deploy "$version"
+    
+    if health_check; then
+        log INFO "Deployment completed successfully"
+    else
+        log ERROR "Deployment failed, consider rolling back"
+        exit 1
+    fi
+}
+
+main "$@"
+```

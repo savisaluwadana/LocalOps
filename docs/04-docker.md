@@ -1,400 +1,528 @@
-# Docker Fundamentals
+# Docker In-Depth Theory
 
-## What is Docker?
+## Container Internals
 
-Docker is a **containerization platform** that packages applications and their dependencies into isolated, portable units called **containers**. Unlike virtual machines, containers share the host OS kernel, making them lightweight and fast.
+### How Containers Actually Work
 
-### Containers vs Virtual Machines
+Containers aren't virtual machines. They're **isolated processes** using Linux kernel features:
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                    VIRTUAL MACHINES                          │
-├─────────────────┬─────────────────┬─────────────────────────┤
-│      App A      │      App B      │         App C           │
-├─────────────────┼─────────────────┼─────────────────────────┤
-│   Guest OS      │   Guest OS      │       Guest OS          │
-│   (Ubuntu)      │   (CentOS)      │       (Debian)          │
-├─────────────────┴─────────────────┴─────────────────────────┤
-│                     HYPERVISOR                               │
-├─────────────────────────────────────────────────────────────┤
-│                     HOST OS                                  │
-├─────────────────────────────────────────────────────────────┤
-│                     HARDWARE                                 │
-└─────────────────────────────────────────────────────────────┘
-
-┌─────────────────────────────────────────────────────────────┐
-│                      CONTAINERS                              │
-├─────────────────┬─────────────────┬─────────────────────────┤
-│      App A      │      App B      │         App C           │
-├─────────────────┼─────────────────┼─────────────────────────┤
-│   Bins/Libs     │   Bins/Libs     │       Bins/Libs         │
-├─────────────────┴─────────────────┴─────────────────────────┤
-│                   DOCKER ENGINE                              │
-├─────────────────────────────────────────────────────────────┤
-│                     HOST OS                                  │
-├─────────────────────────────────────────────────────────────┤
-│                     HARDWARE                                 │
-└─────────────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────────────┐
+│                          HOST KERNEL                                │
+├────────────────────────────────────────────────────────────────────┤
+│                                                                     │
+│  ┌─────────────────────┐  ┌─────────────────────┐                  │
+│  │     Container A     │  │     Container B     │                  │
+│  │  ┌───────────────┐  │  │  ┌───────────────┐  │                  │
+│  │  │   Namespaces  │  │  │  │   Namespaces  │  │◄── Isolation    │
+│  │  │ PID, NET, MNT │  │  │  │ PID, NET, MNT │  │                  │
+│  │  └───────────────┘  │  │  └───────────────┘  │                  │
+│  │  ┌───────────────┐  │  │  ┌───────────────┐  │                  │
+│  │  │    Cgroups    │  │  │  │    Cgroups    │  │◄── Resource     │
+│  │  │ CPU, Memory   │  │  │  │ CPU, Memory   │  │     Limits      │
+│  │  └───────────────┘  │  │  └───────────────┘  │                  │
+│  │  ┌───────────────┐  │  │  ┌───────────────┐  │                  │
+│  │  │   Filesystem  │  │  │  │   Filesystem  │  │◄── Union FS     │
+│  │  │  (overlay2)   │  │  │  │  (overlay2)   │  │                  │
+│  │  └───────────────┘  │  │  └───────────────┘  │                  │
+│  └─────────────────────┘  └─────────────────────┘                  │
+│                                                                     │
+└────────────────────────────────────────────────────────────────────┘
 ```
 
-| Aspect | Containers | VMs |
-|--------|------------|-----|
-| **Boot Time** | Seconds | Minutes |
-| **Size** | MBs | GBs |
-| **Performance** | Near-native | Overhead from Guest OS |
-| **Isolation** | Process-level | Complete OS isolation |
-| **Portability** | Runs anywhere Docker runs | Complex migration |
+### Namespaces (Isolation)
+
+**Namespaces** provide isolation by making resources appear independent:
+
+| Namespace | Isolates |
+|-----------|----------|
+| **PID** | Process IDs (container sees PID 1 for its main process) |
+| **NET** | Network stack (own IP, ports, routes) |
+| **MNT** | Mount points (own filesystem view) |
+| **UTS** | Hostname and domain |
+| **IPC** | Inter-process communication |
+| **USER** | User and group IDs |
+
+**Example: See namespaces**
+```bash
+# List namespaces for a container
+docker inspect --format '{{.State.Pid}}' my_container
+# Returns: 12345
+
+ls -la /proc/12345/ns/
+# lrwxrwxrwx 1 root root 0 Jan 15 10:00 mnt -> 'mnt:[4026532505]'
+# lrwxrwxrwx 1 root root 0 Jan 15 10:00 net -> 'net:[4026532508]'
+# lrwxrwxrwx 1 root root 0 Jan 15 10:00 pid -> 'pid:[4026532506]'
+```
+
+### Cgroups (Resource Limits)
+
+**Control Groups** limit how much CPU, memory, and I/O a container can use:
+
+```bash
+# Run with memory limit
+docker run -m 512m nginx
+
+# Run with CPU limit (0.5 CPU)
+docker run --cpus="0.5" nginx
+
+# Run with both
+docker run -m 512m --cpus="1" nginx
+
+# View cgroup settings
+docker stats my_container
+```
+
+**Under the hood:**
+```bash
+# Cgroups are mounted at:
+ls /sys/fs/cgroup/
+
+# Container limits visible at:
+cat /sys/fs/cgroup/memory/docker/<container_id>/memory.limit_in_bytes
+```
+
+### Union Filesystem (Layers)
+
+Docker images are built in **layers**. Each instruction creates a new read-only layer.
+
+```
+┌────────────────────────────────────────┐
+│          Container Layer               │ ← Read-Write
+│          (runtime changes)             │
+├────────────────────────────────────────┤
+│  Layer 5: COPY app.py .                │ ← Read-Only
+├────────────────────────────────────────┤
+│  Layer 4: RUN pip install flask        │ ← Read-Only  
+├────────────────────────────────────────┤
+│  Layer 3: WORKDIR /app                 │ ← Read-Only
+├────────────────────────────────────────┤
+│  Layer 2: RUN apt-get update           │ ← Read-Only
+├────────────────────────────────────────┤
+│  Layer 1: FROM python:3.11-slim        │ ← Read-Only (base)
+└────────────────────────────────────────┘
+```
+
+**View layers:**
+```bash
+# See image layers
+docker history nginx:latest
+
+# Output:
+# IMAGE          CREATED       CREATED BY                                      SIZE
+# a8758716bb6a   2 weeks ago   /bin/sh -c #(nop)  CMD ["nginx" "-g" "daemon…   0B
+# <missing>      2 weeks ago   /bin/sh -c #(nop)  STOPSIGNAL SIGQUIT           0B
+# <missing>      2 weeks ago   /bin/sh -c #(nop)  EXPOSE 80                    0B
+# <missing>      2 weeks ago   /bin/sh -c set -x     && addgroup --system -…   28.5MB
+# <missing>      2 weeks ago   /bin/sh -c #(nop)  ENV PKG_RELEASE=1~bookworm   0B
+```
 
 ---
 
-## Core Concepts
+## Docker Networking Deep Dive
 
-### 1. Images
+### Network Drivers
 
-An **image** is a read-only template containing:
-- A base OS (Alpine, Ubuntu, etc.)
-- Application code
-- Dependencies
-- Configuration
+| Driver | Use Case | How It Works |
+|--------|----------|--------------|
+| **bridge** | Default single-host | Virtual bridge connecting containers |
+| **host** | Performance-critical | Container uses host network directly |
+| **overlay** | Multi-host (Swarm) | VXLAN tunnel between hosts |
+| **macvlan** | Legacy apps | Container gets own MAC address |
+| **none** | Maximum isolation | No networking |
 
-Images are built in **layers**. Each instruction in a Dockerfile creates a new layer.
+### Bridge Network Internals
 
-```bash
-# List local images
-docker images
-
-# Pull an image from Docker Hub
-docker pull nginx:latest
-
-# Inspect image layers
-docker history nginx:latest
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                          HOST                                        │
+│                                                                      │
+│  ┌──────────────┐  ┌──────────────┐      ┌───────────────────────┐  │
+│  │ Container A  │  │ Container B  │      │    Host Network       │  │
+│  │ 172.17.0.2   │  │ 172.17.0.3   │      │    eth0: 192.168.1.x  │  │
+│  │     vethXXX ─┼──┼─ vethYYY     │      │                       │  │
+│  └──────────────┘  └──────────────┘      └───────────────────────┘  │
+│         │                │                         │                 │
+│         └────────┬───────┘                         │                 │
+│                  │                                 │                 │
+│         ┌────────┴────────┐                        │                 │
+│         │  docker0 bridge │─── NAT (iptables) ────┘                 │
+│         │   172.17.0.1    │                                          │
+│         └─────────────────┘                                          │
+│                                                                      │
+└─────────────────────────────────────────────────────────────────────┘
 ```
 
-### 2. Containers
-
-A **container** is a running instance of an image. You can:
-- Start/stop containers
-- Run multiple containers from the same image
-- Each container has its own filesystem, network, and process space
+**Practical examples:**
 
 ```bash
-# Run a container
-docker run -d --name my_nginx nginx
+# Create custom bridge network
+docker network create --driver bridge \
+  --subnet 10.10.0.0/24 \
+  --gateway 10.10.0.1 \
+  mynetwork
 
-# List running containers
-docker ps
+# Run containers on same network
+docker run -d --name web --network mynetwork nginx
+docker run -d --name app --network mynetwork python:3.11
 
-# List all containers (including stopped)
-docker ps -a
+# Containers can communicate by name
+docker exec app curl http://web  # Works!
 
-# Stop a container
-docker stop my_nginx
+# Inspect network
+docker network inspect mynetwork
 
-# Remove a container
-docker rm my_nginx
+# Connect existing container to additional network
+docker network connect mynetwork existing_container
 ```
 
-### 3. Dockerfile
+### Port Mapping Internals
 
-A **Dockerfile** is a text file with instructions to build an image.
+```bash
+# Map port 80 in container to 8080 on host
+docker run -p 8080:80 nginx
+
+# What happens:
+# 1. Docker creates iptables rules:
+sudo iptables -t nat -L DOCKER -n --line-numbers
+# DNAT tcp -- 0.0.0.0/0 0.0.0.0/0 tcp dpt:8080 to:172.17.0.2:80
+
+# 2. Incoming traffic to host:8080 → container:80
+# 3. Response goes back through NAT
+```
+
+---
+
+## Multi-Stage Builds
+
+Multi-stage builds create smaller, more secure images.
+
+### Problem: Large Build Images
 
 ```dockerfile
-# Start from a base image
-FROM python:3.11-slim
+# BAD: 1.2GB image with build tools
+FROM python:3.11
 
-# Set working directory inside the container
+# Build dependencies included in final image
+RUN apt-get update && apt-get install -y gcc libpq-dev
+COPY requirements.txt .
+RUN pip install -r requirements.txt
+
+COPY . .
+CMD ["python", "app.py"]
+```
+
+### Solution: Multi-Stage
+
+```dockerfile
+# Stage 1: Build
+FROM python:3.11 AS builder
+
+WORKDIR /build
+
+# Install build dependencies
+RUN apt-get update && apt-get install -y gcc libpq-dev
+
+# Create virtual environment
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+# Install Python packages
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Stage 2: Runtime (smaller image)
+FROM python:3.11-slim AS runtime
+
 WORKDIR /app
 
-# Copy dependency file first (for layer caching)
-COPY requirements.txt .
-
-# Install dependencies
-RUN pip install --no-cache-dir -r requirements.txt
+# Copy only the virtual environment from builder
+COPY --from=builder /opt/venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
 
 # Copy application code
 COPY . .
 
-# Document the port (informational)
-EXPOSE 8000
+# Run as non-root
+RUN useradd -m appuser
+USER appuser
 
-# Command to run when container starts
-CMD ["python", "app.py"]
+EXPOSE 5000
+CMD ["gunicorn", "-b", "0.0.0.0:5000", "app:app"]
 ```
 
-Build and run:
-```bash
-docker build -t my-python-app .
-docker run -d -p 8000:8000 my-python-app
-```
-
-### 4. Volumes
-
-**Volumes** persist data beyond container lifecycle.
-
-```bash
-# Named volume
-docker volume create mydata
-docker run -v mydata:/app/data my-app
-
-# Bind mount (host directory)
-docker run -v $(pwd)/data:/app/data my-app
-
-# List volumes
-docker volume ls
-```
-
-### 5. Networks
-
-Docker creates isolated **networks** for container communication.
-
-```bash
-# Create a network
-docker network create mynetwork
-
-# Run containers on the same network
-docker run -d --name db --network mynetwork postgres
-docker run -d --name app --network mynetwork my-app
-
-# Containers can now communicate by name
-# From 'app': curl http://db:5432
-```
+**Result:** Image size reduced from 1.2GB to ~200MB
 
 ---
 
-## Docker Compose
+## Docker Compose Deep Dive
 
-**Docker Compose** defines multi-container applications in a single YAML file.
-
-### Example: Web App with Database
+### Complete Example: Full Stack Application
 
 ```yaml
 # docker-compose.yml
 version: '3.8'
 
-services:
-  web:
-    build: .
-    ports:
-      - "8000:8000"
-    environment:
-      - DATABASE_URL=postgres://user:pass@db:5432/mydb
-    depends_on:
-      - db
-    volumes:
-      - ./app:/app  # Live reload during development
-
-  db:
-    image: postgres:15
-    environment:
-      POSTGRES_USER: user
-      POSTGRES_PASSWORD: pass
-      POSTGRES_DB: mydb
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-
+# Define named volumes
 volumes:
   postgres_data:
+  redis_data:
+
+# Define networks
+networks:
+  frontend:
+    driver: bridge
+  backend:
+    driver: bridge
+    internal: true  # No external access
+
+# Define services
+services:
+  # Reverse Proxy
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./certs:/etc/nginx/certs:ro
+    depends_on:
+      - web
+    networks:
+      - frontend
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "nginx", "-t"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Web Application
+  web:
+    build:
+      context: ./app
+      dockerfile: Dockerfile
+      args:
+        - BUILD_VERSION=${VERSION:-latest}
+    image: myapp:${VERSION:-latest}
+    environment:
+      - DATABASE_URL=postgres://user:pass@db:5432/myapp
+      - REDIS_URL=redis://redis:6379/0
+      - SECRET_KEY=${SECRET_KEY:?error}  # Required variable
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    networks:
+      - frontend
+      - backend
+    deploy:
+      replicas: 2
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
+    restart: unless-stopped
+
+  # Database
+  db:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD_FILE: /run/secrets/db_password
+      POSTGRES_DB: myapp
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U user -d myapp"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    secrets:
+      - db_password
+    restart: unless-stopped
+
+  # Cache
+  redis:
+    image: redis:alpine
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    networks:
+      - backend
+    restart: unless-stopped
+
+  # Background Worker
+  worker:
+    build: ./app
+    command: celery -A tasks worker --loglevel=info
+    environment:
+      - DATABASE_URL=postgres://user:pass@db:5432/myapp
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      - db
+      - redis
+    networks:
+      - backend
+    deploy:
+      replicas: 3
+    restart: unless-stopped
+
+# Secrets (for production)
+secrets:
+  db_password:
+    file: ./secrets/db_password.txt
 ```
 
-Commands:
+### Compose Commands
+
 ```bash
 # Start all services
 docker compose up -d
 
-# View logs
-docker compose logs -f
+# Scale a service
+docker compose up -d --scale worker=5
 
-# Stop and remove
+# View logs
+docker compose logs -f web
+docker compose logs --tail=100 db
+
+# Execute command in service
+docker compose exec web bash
+docker compose exec db psql -U user -d myapp
+
+# Stop everything
 docker compose down
 
-# Stop and remove including volumes
+# Stop and remove volumes
 docker compose down -v
+
+# Rebuild and restart
+docker compose up -d --build
+
+# View service status
+docker compose ps
+
+# Environment override
+docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 ```
 
 ---
 
-## Best Practices
+## Docker Security Best Practices
 
-### Dockerfile Optimization
+### 1. Don't Run as Root
 
 ```dockerfile
-# BAD: Large image, unnecessary cache
-FROM ubuntu:22.04
-RUN apt-get update
-RUN apt-get install -y python3 python3-pip
-COPY . /app
-RUN pip3 install -r /app/requirements.txt
+# Create non-root user
+RUN groupadd -r appgroup && useradd -r -g appgroup appuser
 
-# GOOD: Multi-stage, minimal, cached layers
-FROM python:3.11-slim AS builder
-WORKDIR /app
-COPY requirements.txt .
-RUN pip install --user --no-cache-dir -r requirements.txt
+# Change ownership
+RUN chown -R appuser:appgroup /app
 
-FROM python:3.11-slim
-WORKDIR /app
-COPY --from=builder /root/.local /root/.local
-COPY . .
-ENV PATH=/root/.local/bin:$PATH
-CMD ["python", "app.py"]
+# Switch to non-root user
+USER appuser
 ```
 
-### Security
-
-1. **Don't run as root**:
-   ```dockerfile
-   RUN useradd -m appuser
-   USER appuser
-   ```
-
-2. **Use specific tags, not `latest`**:
-   ```dockerfile
-   FROM python:3.11.7-slim  # Good
-   FROM python:latest       # Bad
-   ```
-
-3. **Scan for vulnerabilities**:
-   ```bash
-   docker scout cves my-image:latest
-   ```
-
----
-
-## Hands-On Lab
-
-### Exercise 1: Run Your First Container (5 mins)
-
-```bash
-# Run nginx and map port 80 to 8080
-docker run -d --name web -p 8080:80 nginx
-
-# Visit http://localhost:8080 in your browser
-
-# Check logs
-docker logs web
-
-# Stop and remove
-docker stop web && docker rm web
-```
-
-### Exercise 2: Build a Custom Image (15 mins)
-
-Create a simple Python Flask app:
-
-```bash
-mkdir ~/docker-lab && cd ~/docker-lab
-```
-
-Create `app.py`:
-```python
-from flask import Flask
-app = Flask(__name__)
-
-@app.route('/')
-def hello():
-    return "Hello from Docker!"
-
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000)
-```
-
-Create `requirements.txt`:
-```
-flask==3.0.0
-```
-
-Create `Dockerfile`:
-```dockerfile
-FROM python:3.11-slim
-WORKDIR /app
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-COPY . .
-EXPOSE 5000
-CMD ["python", "app.py"]
-```
-
-Build and run:
-```bash
-docker build -t my-flask-app .
-docker run -d -p 5000:5000 my-flask-app
-curl localhost:5000
-```
-
-### Exercise 3: Docker Compose Stack (20 mins)
-
-Create a WordPress stack:
+### 2. Use Read-Only Filesystem
 
 ```yaml
-# docker-compose.yml
-version: '3.8'
-
 services:
-  wordpress:
-    image: wordpress:latest
-    ports:
-      - "8080:80"
-    environment:
-      WORDPRESS_DB_HOST: db
-      WORDPRESS_DB_USER: wp_user
-      WORDPRESS_DB_PASSWORD: wp_pass
-      WORDPRESS_DB_NAME: wordpress
-    depends_on:
-      - db
-
-  db:
-    image: mysql:8.0
-    environment:
-      MYSQL_DATABASE: wordpress
-      MYSQL_USER: wp_user
-      MYSQL_PASSWORD: wp_pass
-      MYSQL_ROOT_PASSWORD: root_secret
-    volumes:
-      - db_data:/var/lib/mysql
-
-volumes:
-  db_data:
+  web:
+    image: myapp
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /var/run
 ```
 
+### 3. Limit Capabilities
+
+```yaml
+services:
+  web:
+    image: myapp
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE  # Only if needed
+```
+
+### 4. Security Scanning
+
 ```bash
+# Scan with Docker Scout
+docker scout cves myapp:latest
+
+# Scan with Trivy
+trivy image myapp:latest
+
+# Scan with Snyk
+snyk container test myapp:latest
+```
+
+### 5. Use Specific Tags
+
+```dockerfile
+# BAD - unpredictable
+FROM python:latest
+
+# GOOD - specific version
+FROM python:3.11.7-slim-bookworm
+```
+
+---
+
+## Real-World Example: Building a Microservices Stack
+
+```bash
+# Project structure
+myproject/
+├── docker-compose.yml
+├── services/
+│   ├── api/
+│   │   ├── Dockerfile
+│   │   └── app.py
+│   ├── worker/
+│   │   ├── Dockerfile
+│   │   └── tasks.py
+│   └── web/
+│       ├── Dockerfile
+│       └── src/
+├── nginx/
+│   └── nginx.conf
+└── scripts/
+    ├── deploy.sh
+    └── backup.sh
+```
+
+**Deploy script:**
+```bash
+#!/bin/bash
+set -e
+
+echo "Building images..."
+docker compose build
+
+echo "Running tests..."
+docker compose run --rm api pytest
+
+echo "Deploying..."
 docker compose up -d
-# Visit http://localhost:8080 to set up WordPress
+
+echo "Waiting for health checks..."
+sleep 10
+
+echo "Verifying..."
+curl -f http://localhost/health || exit 1
+
+echo "Deployment complete!"
 ```
-
----
-
-## Essential Commands Cheatsheet
-
-```bash
-# Images
-docker images                    # List images
-docker pull <image>              # Download image
-docker build -t <name> .         # Build from Dockerfile
-docker rmi <image>               # Remove image
-docker image prune               # Remove unused images
-
-# Containers
-docker run -d -p 80:80 <image>   # Run in background
-docker exec -it <container> bash # Shell into container
-docker logs -f <container>       # Follow logs
-docker stop <container>          # Stop gracefully
-docker rm <container>            # Remove container
-docker container prune           # Remove stopped containers
-
-# Compose
-docker compose up -d             # Start services
-docker compose down              # Stop services
-docker compose logs -f           # View logs
-docker compose ps                # List services
-
-# Cleanup
-docker system prune -a           # Remove everything unused
-```
-
----
-
-## Further Learning
-
-1. **Play with Docker**: [labs.play-with-docker.com](https://labs.play-with-docker.com/)
-2. **Official Docs**: [docs.docker.com](https://docs.docker.com/)
-3. **Book**: "Docker Deep Dive" by Nigel Poulton
