@@ -1,0 +1,63 @@
+---
+- name: Configure Web Servers
+  hosts: web
+  gather_facts: no
+
+  tasks:
+    - name: Create custom index.html
+      copy:
+        dest: /usr/share/nginx/html/index.html
+        content: |
+          <!DOCTYPE html>
+          <html>
+          <head><title>{{ inventory_hostname }}</title></head>
+          <body>
+            <h1>Welcome to {{ inventory_hostname }}</h1>
+            <p>Environment: {{ environment }}</p>
+            <p>Database: {{ database_host }}</p>
+            <p>Redis: {{ redis_host }}</p>
+          </body>
+          </html>
+
+    - name: Create health endpoint
+      copy:
+        dest: /usr/share/nginx/html/health
+        content: '{"status": "ok", "host": "{{ inventory_hostname }}"}'
+
+    - name: Reload nginx
+      command: nginx -s reload
+
+- name: Verify Database
+  hosts: database
+  gather_facts: no
+
+  tasks:
+    - name: Check PostgreSQL is ready
+      command: pg_isready -U app
+      register: db_ready
+      retries: 5
+      delay: 2
+      until: db_ready.rc == 0
+
+    - name: Create application table
+      shell: |
+        psql -U app -d myapp -c "
+          CREATE TABLE IF NOT EXISTS requests (
+            id SERIAL PRIMARY KEY,
+            path TEXT,
+            created_at TIMESTAMP DEFAULT NOW()
+          );
+        "
+
+- name: Verify Cache
+  hosts: cache
+  gather_facts: no
+
+  tasks:
+    - name: Ping Redis
+      command: redis-cli ping
+      register: redis_ping
+
+    - name: Display Redis status
+      debug:
+        msg: "Redis status: {{ redis_ping.stdout }}"
