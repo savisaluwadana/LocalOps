@@ -1,0 +1,60 @@
+version: '3.8'
+
+services:
+  api:
+    build: ./api
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgres://health:password@postgres:5432/health
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - health
+
+  checker:
+    build: ./checker
+    environment:
+      - DATABASE_URL=postgres://health:password@postgres:5432/health
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - health
+
+  status-page:
+    build: ./status-page
+    ports:
+      - "3000:3000"
+    environment:
+      - API_URL=http://api:8000
+    depends_on:
+      - api
+    networks:
+      - health
+
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: health
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: health
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - health
+
+  redis:
+    image: redis:alpine
+    networks:
+      - health
+
+networks:
+  health:
+    driver: bridge
+
+volumes:
+  postgres_data:

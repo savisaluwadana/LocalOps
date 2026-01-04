@@ -1,0 +1,39 @@
+version: '3.8'
+
+services:
+  api:
+    build: ./api
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgres://config:password@postgres:5432/config
+      - REDIS_URL=redis://redis:6379
+      - ENCRYPTION_KEY=super-secret-key
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - config
+
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: config
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: config
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - config
+
+  redis:
+    image: redis:alpine
+    networks:
+      - config
+
+networks:
+  config:
+    driver: bridge
+
+volumes:
+  postgres_data:

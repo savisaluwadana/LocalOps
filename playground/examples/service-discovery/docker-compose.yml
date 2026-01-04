@@ -1,0 +1,54 @@
+version: '3.8'
+
+services:
+  consul:
+    image: hashicorp/consul:latest
+    ports:
+      - "8500:8500"
+      - "8600:8600/udp"
+    command: agent -server -ui -bootstrap-expect=1 -client=0.0.0.0
+    volumes:
+      - consul_data:/consul/data
+    networks:
+      - discovery
+
+  api-1:
+    build: ./api
+    environment:
+      - CONSUL_HTTP_ADDR=consul:8500
+      - SERVICE_NAME=api
+      - SERVICE_PORT=8000
+    depends_on:
+      - consul
+    networks:
+      - discovery
+
+  api-2:
+    build: ./api
+    environment:
+      - CONSUL_HTTP_ADDR=consul:8500
+      - SERVICE_NAME=api
+      - SERVICE_PORT=8000
+    depends_on:
+      - consul
+    networks:
+      - discovery
+
+  fabio:
+    image: fabiolb/fabio
+    ports:
+      - "9999:9999"   # Load balancer
+      - "9998:9998"   # UI
+    environment:
+      - registry.consul.addr=consul:8500
+    depends_on:
+      - consul
+    networks:
+      - discovery
+
+networks:
+  discovery:
+    driver: bridge
+
+volumes:
+  consul_data:

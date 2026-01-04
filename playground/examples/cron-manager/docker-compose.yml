@@ -1,0 +1,60 @@
+version: '3.8'
+
+services:
+  api:
+    build: ./api
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgres://cron:password@postgres:5432/cron
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - cron
+
+  scheduler:
+    build: ./scheduler
+    environment:
+      - DATABASE_URL=postgres://cron:password@postgres:5432/cron
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - cron
+
+  worker:
+    build: ./worker
+    environment:
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      - redis
+    deploy:
+      replicas: 3
+    networks:
+      - cron
+
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: cron
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: cron
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - cron
+
+  redis:
+    image: redis:alpine
+    networks:
+      - cron
+
+networks:
+  cron:
+    driver: bridge
+
+volumes:
+  postgres_data:
