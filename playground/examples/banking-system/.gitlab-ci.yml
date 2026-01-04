@@ -1,0 +1,75 @@
+stages:
+  - test
+  - build
+  - security
+  - deploy
+
+variables:
+  IMAGE_NAME: $CI_REGISTRY_IMAGE/api
+  POSTGRES_USER: test
+  POSTGRES_PASSWORD: test
+  POSTGRES_DB: test
+
+test:
+  stage: test
+  image: node:18-alpine
+  services:
+    - postgres:15-alpine
+    - redis:alpine
+  script:
+    - cd api && npm ci
+    - npm run lint --if-present
+    - npm test --if-present
+  cache:
+    paths:
+      - api/node_modules/
+
+build:
+  stage: build
+  image: docker:latest
+  services:
+    - docker:dind
+  script:
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+    - docker build -t $IMAGE_NAME:$CI_COMMIT_SHA -t $IMAGE_NAME:latest ./api
+    - docker push $IMAGE_NAME:$CI_COMMIT_SHA
+    - docker push $IMAGE_NAME:latest
+  only:
+    - main
+    - develop
+
+security_scan:
+  stage: security
+  image: aquasec/trivy:latest
+  script:
+    - trivy image --exit-code 1 --severity HIGH,CRITICAL $IMAGE_NAME:$CI_COMMIT_SHA
+  allow_failure: true
+  only:
+    - main
+
+deploy_staging:
+  stage: deploy
+  image: bitnami/kubectl:latest
+  script:
+    - kubectl config set-cluster k8s --server=$KUBE_SERVER --certificate-authority=$KUBE_CA
+    - kubectl config set-credentials deployer --token=$KUBE_TOKEN
+    - kubectl config set-context default --cluster=k8s --user=deployer
+    - kubectl config use-context default
+    - kubectl set image deployment/banking-api api=$IMAGE_NAME:$CI_COMMIT_SHA -n banking-staging
+    - kubectl rollout status deployment/banking-api -n banking-staging
+  environment:
+    name: staging
+  only:
+    - develop
+
+deploy_production:
+  stage: deploy
+  image: bitnami/kubectl:latest
+  script:
+    - kubectl set image deployment/banking-api api=$IMAGE_NAME:$CI_COMMIT_SHA -n banking-prod
+    - kubectl rollout status deployment/banking-api -n banking-prod
+  environment:
+    name: production
+  when: manual
+  only:
+    - main

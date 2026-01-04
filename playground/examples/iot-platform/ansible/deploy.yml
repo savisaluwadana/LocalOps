@@ -1,0 +1,91 @@
+---
+- name: Deploy IoT Platform
+  hosts: iot_servers
+  become: yes
+  vars:
+    app_name: iot-platform
+    mqtt_port: 1883
+    
+  tasks:
+    - name: Install Docker
+      apt:
+        name: docker.io
+        state: present
+
+    - name: Install MQTT Broker
+      docker_container:
+        name: mosquitto
+        image: eclipse-mosquitto:latest
+        ports:
+          - "{{ mqtt_port }}:1883"
+          - "9001:9001"
+        volumes:
+          - mosquitto_data:/mosquitto/data
+          - mosquitto_log:/mosquitto/log
+        state: started
+
+    - name: Deploy API Server
+      docker_container:
+        name: iot-api
+        image: "{{ docker_image | default('iot-api:latest') }}"
+        ports:
+          - "8000:8000"
+        env:
+          MQTT_URL: "mqtt://localhost:{{ mqtt_port }}"
+          DATABASE_URL: "{{ database_url }}"
+        state: started
+
+    - name: Setup TimescaleDB
+      docker_container:
+        name: timescale
+        image: timescale/timescaledb:latest-pg15
+        ports:
+          - "5432:5432"
+        env:
+          POSTGRES_USER: iot
+          POSTGRES_PASSWORD: "{{ db_password }}"
+          POSTGRES_DB: iot
+        volumes:
+          - timescale_data:/var/lib/postgresql/data
+        state: started
+
+    - name: Configure firewall for MQTT
+      ufw:
+        rule: allow
+        port: "{{ mqtt_port }}"
+        proto: tcp
+
+- name: Deploy IoT Edge Nodes
+  hosts: edge_nodes
+  become: yes
+  
+  tasks:
+    - name: Install edge software
+      apt:
+        name:
+          - mosquitto-clients
+          - python3-pip
+        state: present
+
+    - name: Install Python MQTT client
+      pip:
+        name: paho-mqtt
+
+    - name: Deploy data collector script
+      template:
+        src: templates/collector.py.j2
+        dest: /opt/collector.py
+        mode: '0755'
+
+    - name: Setup systemd service
+      template:
+        src: templates/collector.service.j2
+        dest: /etc/systemd/system/iot-collector.service
+      notify: Restart collector
+
+  handlers:
+    - name: Restart collector
+      systemd:
+        name: iot-collector
+        state: restarted
+        enabled: yes

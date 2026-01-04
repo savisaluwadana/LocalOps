@@ -1,0 +1,98 @@
+version: 2.1
+
+orbs:
+  node: circleci/node@5.1
+  docker: circleci/docker@2.4
+  kubernetes: circleci/kubernetes@1.3
+
+executors:
+  node-executor:
+    docker:
+      - image: cimg/node:18.0
+
+jobs:
+  test:
+    executor: node-executor
+    steps:
+      - checkout
+      - node/install-packages:
+          pkg-manager: npm
+          app-dir: api
+      - run:
+          name: Run tests
+          command: cd api && npm test --if-present
+
+  build:
+    executor: docker/docker
+    steps:
+      - checkout
+      - setup_remote_docker
+      - docker/check
+      - docker/build:
+          image: $CIRCLE_PROJECT_USERNAME/$CIRCLE_PROJECT_REPONAME
+          tag: $CIRCLE_SHA1
+          path: ./api
+      - docker/push:
+          image: $CIRCLE_PROJECT_USERNAME/$CIRCLE_PROJECT_REPONAME
+          tag: $CIRCLE_SHA1
+
+  deploy-staging:
+    executor: node-executor
+    steps:
+      - checkout
+      - kubernetes/install-kubectl
+      - run:
+          name: Deploy to staging
+          command: |
+            echo "$KUBE_CONFIG" | base64 -d > kubeconfig.yaml
+            export KUBECONFIG=kubeconfig.yaml
+            kubectl set image deployment/iot-api \
+              api=$CIRCLE_PROJECT_USERNAME/$CIRCLE_PROJECT_REPONAME:$CIRCLE_SHA1 \
+              -n iot-staging
+            kubectl rollout status deployment/iot-api -n iot-staging
+
+  deploy-production:
+    executor: node-executor
+    steps:
+      - checkout
+      - kubernetes/install-kubectl
+      - run:
+          name: Deploy to production
+          command: |
+            echo "$KUBE_CONFIG" | base64 -d > kubeconfig.yaml
+            export KUBECONFIG=kubeconfig.yaml
+            kubectl set image deployment/iot-api \
+              api=$CIRCLE_PROJECT_USERNAME/$CIRCLE_PROJECT_REPONAME:$CIRCLE_SHA1 \
+              -n iot-production
+
+workflows:
+  build-and-deploy:
+    jobs:
+      - test
+      - build:
+          requires:
+            - test
+          filters:
+            branches:
+              only:
+                - main
+                - develop
+      - deploy-staging:
+          requires:
+            - build
+          filters:
+            branches:
+              only: develop
+      - hold:
+          type: approval
+          requires:
+            - build
+          filters:
+            branches:
+              only: main
+      - deploy-production:
+          requires:
+            - hold
+          filters:
+            branches:
+              only: main

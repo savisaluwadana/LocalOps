@@ -1,0 +1,70 @@
+---
+- name: Deploy Food Delivery Platform
+  hosts: app_servers
+  become: yes
+  vars:
+    app_name: food-delivery
+    app_dir: /opt/food-delivery
+    
+  tasks:
+    - name: Install Docker
+      apt:
+        name:
+          - docker.io
+          - docker-compose-plugin
+        state: present
+        update_cache: yes
+
+    - name: Create app directory
+      file:
+        path: "{{ app_dir }}"
+        state: directory
+
+    - name: Copy docker-compose
+      copy:
+        src: ../docker-compose.yml
+        dest: "{{ app_dir }}/docker-compose.yml"
+
+    - name: Deploy with Docker Compose
+      docker_compose:
+        project_src: "{{ app_dir }}"
+        state: present
+        pull: yes
+      register: output
+
+    - name: Health check
+      uri:
+        url: "http://localhost:8000/health"
+        status_code: 200
+      register: result
+      until: result.status == 200
+      retries: 30
+      delay: 5
+
+- name: Setup Load Balancer
+  hosts: lb_servers
+  become: yes
+  
+  tasks:
+    - name: Install Nginx
+      apt:
+        name: nginx
+        state: present
+
+    - name: Configure upstream
+      template:
+        src: templates/nginx.conf.j2
+        dest: /etc/nginx/sites-available/food-delivery
+      notify: Reload Nginx
+
+    - name: Enable site
+      file:
+        src: /etc/nginx/sites-available/food-delivery
+        dest: /etc/nginx/sites-enabled/food-delivery
+        state: link
+
+  handlers:
+    - name: Reload Nginx
+      service:
+        name: nginx
+        state: reloaded

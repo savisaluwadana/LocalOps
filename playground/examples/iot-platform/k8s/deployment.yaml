@@ -1,0 +1,85 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: iot-api
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: iot-api
+  template:
+    metadata:
+      labels:
+        app: iot-api
+    spec:
+      containers:
+        - name: api
+          image: iot-api:latest
+          ports:
+            - containerPort: 8000
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: iot-secrets
+                  key: database-url
+            - name: MQTT_URL
+              value: mqtt://mqtt-broker:1883
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "200m"
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mqtt-broker
+spec:
+  serviceName: mqtt-broker
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mqtt-broker
+  template:
+    metadata:
+      labels:
+        app: mqtt-broker
+    spec:
+      containers:
+        - name: mosquitto
+          image: eclipse-mosquitto:latest
+          ports:
+            - containerPort: 1883
+            - containerPort: 9001
+          volumeMounts:
+            - name: config
+              mountPath: /mosquitto/config
+      volumes:
+        - name: config
+          configMap:
+            name: mosquitto-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mqtt-broker
+spec:
+  selector:
+    app: mqtt-broker
+  ports:
+    - name: mqtt
+      port: 1883
+    - name: ws
+      port: 9001
+  type: LoadBalancer
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: iot-api
+spec:
+  selector:
+    app: iot-api
+  ports:
+    - port: 80
+      targetPort: 8000

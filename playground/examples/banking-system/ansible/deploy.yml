@@ -1,0 +1,65 @@
+---
+- name: Deploy Banking System
+  hosts: app_servers
+  become: yes
+  vars:
+    app_name: banking-system
+    app_dir: /opt/banking
+    
+  pre_tasks:
+    - name: Ensure compliance requirements
+      assert:
+        that:
+          - ansible_distribution == "Ubuntu"
+          - ansible_distribution_major_version | int >= 20
+        fail_msg: "This playbook requires Ubuntu 20.04+"
+
+  tasks:
+    - name: Install security packages
+      apt:
+        name:
+          - fail2ban
+          - ufw
+          - auditd
+        state: present
+
+    - name: Configure firewall
+      ufw:
+        rule: allow
+        port: "{{ item }}"
+        proto: tcp
+      loop:
+        - "22"
+        - "80"
+        - "443"
+
+    - name: Enable firewall
+      ufw:
+        state: enabled
+        policy: deny
+
+    - name: Create app directory
+      file:
+        path: "{{ app_dir }}"
+        state: directory
+        mode: '0700'
+
+    - name: Deploy application
+      docker_compose:
+        project_src: "{{ app_dir }}"
+        state: present
+      register: output
+
+    - name: Configure audit logging
+      copy:
+        content: |
+          -w /opt/banking -p wa -k banking_changes
+          -w /var/log/banking -p wa -k banking_logs
+        dest: /etc/audit/rules.d/banking.rules
+      notify: Restart auditd
+
+  handlers:
+    - name: Restart auditd
+      service:
+        name: auditd
+        state: restarted
