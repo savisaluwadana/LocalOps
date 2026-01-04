@@ -1,0 +1,49 @@
+_format_version: "3.0"
+
+services:
+  - name: users-service
+    url: http://users-api
+    routes:
+      - name: users-route
+        paths:
+          - /api/users
+        strip_path: true
+    plugins:
+      - name: rate-limiting
+        config:
+          minute: 100
+          policy: local
+
+  - name: products-service
+    url: http://products-api
+    routes:
+      - name: products-route
+        paths:
+          - /api/products
+        strip_path: true
+    plugins:
+      - name: rate-limiting
+        config:
+          minute: 200
+          policy: local
+
+plugins:
+  - name: cors
+    config:
+      origins:
+        - "*"
+      methods:
+        - GET
+        - POST
+        - PUT
+        - DELETE
+      headers:
+        - Content-Type
+        - Authorization
+
+  - name: request-termination
+    route: null
+    service: null
+    config:
+      status_code: 404
+      message: "Not Found"

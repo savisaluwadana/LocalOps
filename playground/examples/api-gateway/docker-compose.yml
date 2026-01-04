@@ -1,0 +1,40 @@
+version: '3.8'
+
+services:
+  kong:
+    image: kong:latest
+    environment:
+      KONG_DATABASE: "off"
+      KONG_DECLARATIVE_CONFIG: /kong/config/kong.yml
+      KONG_PROXY_ACCESS_LOG: /dev/stdout
+      KONG_ADMIN_ACCESS_LOG: /dev/stdout
+      KONG_PROXY_ERROR_LOG: /dev/stderr
+      KONG_ADMIN_ERROR_LOG: /dev/stderr
+      KONG_ADMIN_LISTEN: 0.0.0.0:8001
+    ports:
+      - "8000:8000"  # Proxy
+      - "8001:8001"  # Admin API
+      - "8443:8443"  # Proxy SSL
+    volumes:
+      - ./kong.yml:/kong/config/kong.yml
+    networks:
+      - kong
+
+  # Backend services
+  users-api:
+    image: nginx:alpine
+    volumes:
+      - ./services/users.json:/usr/share/nginx/html/users.json
+    networks:
+      - kong
+
+  products-api:
+    image: nginx:alpine
+    volumes:
+      - ./services/products.json:/usr/share/nginx/html/products.json
+    networks:
+      - kong
+
+networks:
+  kong:
+    driver: bridge

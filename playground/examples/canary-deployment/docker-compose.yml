@@ -1,0 +1,44 @@
+version: '3.8'
+
+services:
+  lb:
+    image: nginx:alpine
+    ports:
+      - "8080:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - stable
+      - canary
+    networks:
+      - canary
+
+  stable:
+    build:
+      context: ./app
+      args:
+        VERSION: "1.0.0"
+    deploy:
+      replicas: 3
+    environment:
+      - VERSION=1.0.0
+      - COLOR=blue
+    networks:
+      - canary
+
+  canary:
+    build:
+      context: ./app
+      args:
+        VERSION: "2.0.0"
+    deploy:
+      replicas: 1
+    environment:
+      - VERSION=2.0.0
+      - COLOR=green
+    networks:
+      - canary
+
+networks:
+  canary:
+    driver: bridge

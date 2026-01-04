@@ -1,0 +1,48 @@
+version: '3.8'
+
+services:
+  # Application stack
+  web:
+    image: nginx:alpine
+    ports:
+      - "8080:80"
+    deploy:
+      replicas: 3
+    networks:
+      - chaos
+
+  api:
+    image: python:3.11-alpine
+    command: python -m http.server 8000
+    deploy:
+      replicas: 2
+    networks:
+      - chaos
+
+  db:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_PASSWORD: password
+    networks:
+      - chaos
+
+  # Monitoring
+  prometheus:
+    image: prom/prometheus:latest
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+    networks:
+      - chaos
+
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3000:3000"
+    networks:
+      - chaos
+
+networks:
+  chaos:
+    driver: bridge
