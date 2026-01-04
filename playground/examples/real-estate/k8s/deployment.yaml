@@ -1,0 +1,65 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: realestate-api
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: realestate-api
+  template:
+    metadata:
+      labels:
+        app: realestate-api
+    spec:
+      containers:
+        - name: api
+          image: realestate-api:latest
+          ports:
+            - containerPort: 8000
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: realestate-secrets
+                  key: database-url
+            - name: ELASTICSEARCH_URL
+              value: http://elasticsearch:9200
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: realestate-api
+spec:
+  selector:
+    app: realestate-api
+  ports:
+    - port: 80
+      targetPort: 8000
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: elasticsearch
+spec:
+  serviceName: elasticsearch
+  replicas: 3
+  selector:
+    matchLabels:
+      app: elasticsearch
+  template:
+    metadata:
+      labels:
+        app: elasticsearch
+    spec:
+      containers:
+        - name: elasticsearch
+          image: elasticsearch:8.11.0
+          ports:
+            - containerPort: 9200
+          env:
+            - name: discovery.type
+              value: single-node
+          resources:
+            requests:
+              memory: "2Gi"

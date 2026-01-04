@@ -1,0 +1,93 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: social-api
+spec:
+  replicas: 10
+  selector:
+    matchLabels:
+      app: social-api
+  template:
+    metadata:
+      labels:
+        app: social-api
+    spec:
+      containers:
+        - name: api
+          image: social-api:latest
+          ports:
+            - containerPort: 8000
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: social-secrets
+                  key: database-url
+            - name: REDIS_URL
+              value: redis://redis:6379
+            - name: ELASTICSEARCH_URL
+              value: http://elasticsearch:9200
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: social-websocket
+spec:
+  replicas: 5
+  selector:
+    matchLabels:
+      app: social-websocket
+  template:
+    metadata:
+      labels:
+        app: social-websocket
+    spec:
+      containers:
+        - name: websocket
+          image: social-websocket:latest
+          ports:
+            - containerPort: 8001
+          env:
+            - name: REDIS_URL
+              value: redis://redis:6379
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: social-api
+spec:
+  selector:
+    app: social-api
+  ports:
+    - port: 80
+      targetPort: 8000
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: social-websocket
+spec:
+  selector:
+    app: social-websocket
+  ports:
+    - port: 80
+      targetPort: 8001
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: social-api-hpa
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: social-api
+  minReplicas: 10
+  maxReplicas: 200
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 50

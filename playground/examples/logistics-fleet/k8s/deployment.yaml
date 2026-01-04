@@ -1,0 +1,77 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: logistics-api
+spec:
+  replicas: 5
+  selector:
+    matchLabels:
+      app: logistics-api
+  template:
+    metadata:
+      labels:
+        app: logistics-api
+    spec:
+      containers:
+        - name: api
+          image: logistics-api:latest
+          ports:
+            - containerPort: 8000
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: logistics-secrets
+                  key: database-url
+            - name: REDIS_URL
+              value: redis://redis:6379
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tracking-service
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: tracking-service
+  template:
+    metadata:
+      labels:
+        app: tracking-service
+    spec:
+      containers:
+        - name: tracking
+          image: tracking-service:latest
+          ports:
+            - containerPort: 8001
+          env:
+            - name: REDIS_URL
+              value: redis://redis:6379
+            - name: TIMESCALE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: logistics-secrets
+                  key: timescale-url
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: logistics-api
+spec:
+  selector:
+    app: logistics-api
+  ports:
+    - port: 80
+      targetPort: 8000
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tracking-service
+spec:
+  selector:
+    app: tracking-service
+  ports:
+    - port: 80
+      targetPort: 8001

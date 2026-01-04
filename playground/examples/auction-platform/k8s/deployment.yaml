@@ -1,0 +1,87 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: auction-api
+spec:
+  replicas: 5
+  selector:
+    matchLabels:
+      app: auction-api
+  template:
+    metadata:
+      labels:
+        app: auction-api
+    spec:
+      containers:
+        - name: api
+          image: auction-api:latest
+          ports:
+            - containerPort: 8000
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: auction-secrets
+                  key: database-url
+            - name: REDIS_URL
+              value: redis://redis:6379
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: auction-websocket
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: auction-websocket
+  template:
+    metadata:
+      labels:
+        app: auction-websocket
+    spec:
+      containers:
+        - name: websocket
+          image: auction-websocket:latest
+          ports:
+            - containerPort: 8001
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: auction-scheduler
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: auction-scheduler
+  template:
+    metadata:
+      labels:
+        app: auction-scheduler
+    spec:
+      containers:
+        - name: scheduler
+          image: auction-scheduler:latest
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: auction-api
+spec:
+  selector:
+    app: auction-api
+  ports:
+    - port: 80
+      targetPort: 8000
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: auction-websocket
+spec:
+  selector:
+    app: auction-websocket
+  ports:
+    - port: 80
+      targetPort: 8001

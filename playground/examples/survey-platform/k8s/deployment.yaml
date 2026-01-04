@@ -1,0 +1,36 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: survey-api
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: survey-api
+  template:
+    metadata:
+      labels:
+        app: survey-api
+    spec:
+      containers:
+        - name: api
+          image: survey-api:latest
+          ports:
+            - containerPort: 8000
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: survey-secrets
+                  key: database-url
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: survey-api
+spec:
+  selector:
+    app: survey-api
+  ports:
+    - port: 80
+      targetPort: 8000
