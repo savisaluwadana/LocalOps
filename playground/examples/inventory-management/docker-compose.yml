@@ -1,0 +1,66 @@
+version: '3.8'
+
+services:
+  api:
+    build: ./api
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgres://inventory:password@postgres:5432/inventory
+      - REDIS_URL=redis://redis:6379
+      - RABBITMQ_URL=amqp://rabbitmq:5672
+    depends_on:
+      - postgres
+      - redis
+      - rabbitmq
+    networks:
+      - inventory
+
+  worker:
+    build: ./worker
+    environment:
+      - DATABASE_URL=postgres://inventory:password@postgres:5432/inventory
+      - RABBITMQ_URL=amqp://rabbitmq:5672
+    depends_on:
+      - postgres
+      - rabbitmq
+    networks:
+      - inventory
+
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: inventory
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: inventory
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./database/init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - inventory
+
+  redis:
+    image: redis:alpine
+    networks:
+      - inventory
+
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    ports:
+      - "15672:15672"
+    networks:
+      - inventory
+
+  prometheus:
+    image: prom/prometheus:latest
+    ports:
+      - "9090:9090"
+    networks:
+      - inventory
+
+networks:
+  inventory:
+    driver: bridge
+
+volumes:
+  postgres_data:
