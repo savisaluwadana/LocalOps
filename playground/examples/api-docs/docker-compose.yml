@@ -1,0 +1,38 @@
+version: '3.8'
+
+services:
+  swagger-ui:
+    image: swaggerapi/swagger-ui
+    ports:
+      - "8080:8080"
+    environment:
+      - SWAGGER_JSON=/spec/openapi.yaml
+    volumes:
+      - ./specs:/spec
+    networks:
+      - docs
+
+  redoc:
+    image: redocly/redoc
+    ports:
+      - "8081:80"
+    environment:
+      - SPEC_URL=/spec/openapi.yaml
+    volumes:
+      - ./specs:/usr/share/nginx/html/spec
+    networks:
+      - docs
+
+  prism:
+    image: stoplight/prism:latest
+    ports:
+      - "4010:4010"
+    command: mock -h 0.0.0.0 /spec/openapi.yaml
+    volumes:
+      - ./specs:/spec
+    networks:
+      - docs
+
+networks:
+  docs:
+    driver: bridge

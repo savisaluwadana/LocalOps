@@ -1,0 +1,51 @@
+version: '3.8'
+
+services:
+  api:
+    build: ./api
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgres://hr:password@postgres:5432/hr
+      - REDIS_URL=redis://redis:6379
+      - JWT_SECRET=hr-secret
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - hr
+
+  portal:
+    build: ./portal
+    ports:
+      - "3000:3000"
+    environment:
+      - API_URL=http://api:8000
+    depends_on:
+      - api
+    networks:
+      - hr
+
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: hr
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: hr
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./database/init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - hr
+
+  redis:
+    image: redis:alpine
+    networks:
+      - hr
+
+networks:
+  hr:
+    driver: bridge
+
+volumes:
+  postgres_data:

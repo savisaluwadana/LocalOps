@@ -1,0 +1,61 @@
+version: '3.8'
+
+services:
+  api:
+    build: ./api
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgres://helpdesk:password@postgres:5432/helpdesk
+      - REDIS_URL=redis://redis:6379
+      - RABBITMQ_URL=amqp://rabbitmq:5672
+    depends_on:
+      - postgres
+      - redis
+      - rabbitmq
+    networks:
+      - helpdesk
+
+  customer-portal:
+    build: ./customer-portal
+    ports:
+      - "3000:3000"
+    networks:
+      - helpdesk
+
+  agent-dashboard:
+    build: ./agent-dashboard
+    ports:
+      - "3001:3000"
+    networks:
+      - helpdesk
+
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: helpdesk
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: helpdesk
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - helpdesk
+
+  redis:
+    image: redis:alpine
+    networks:
+      - helpdesk
+
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    ports:
+      - "15672:15672"
+    networks:
+      - helpdesk
+
+networks:
+  helpdesk:
+    driver: bridge
+
+volumes:
+  postgres_data:

@@ -1,0 +1,61 @@
+version: '3.8'
+
+services:
+  api:
+    build: ./api
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgres://lms:password@postgres:5432/lms
+      - REDIS_URL=redis://redis:6379
+      - MINIO_ENDPOINT=minio:9000
+    depends_on:
+      - postgres
+      - redis
+      - minio
+    networks:
+      - lms
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "3000:3000"
+    networks:
+      - lms
+
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: lms
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: lms
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - lms
+
+  redis:
+    image: redis:alpine
+    networks:
+      - lms
+
+  minio:
+    image: minio/minio
+    command: server /data --console-address ":9001"
+    ports:
+      - "9000:9000"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    volumes:
+      - minio_data:/data
+    networks:
+      - lms
+
+networks:
+  lms:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  minio_data:

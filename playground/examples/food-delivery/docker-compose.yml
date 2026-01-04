@@ -1,0 +1,66 @@
+version: '3.8'
+
+services:
+  api:
+    build: ./api
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgres://delivery:password@postgres:5432/delivery
+      - REDIS_URL=redis://redis:6379
+      - RABBITMQ_URL=amqp://rabbitmq:5672
+    depends_on:
+      - postgres
+      - redis
+      - rabbitmq
+    networks:
+      - delivery
+
+  customer-app:
+    build: ./customer-app
+    ports:
+      - "3000:3000"
+    networks:
+      - delivery
+
+  restaurant-dashboard:
+    build: ./restaurant-dashboard
+    ports:
+      - "3001:3000"
+    networks:
+      - delivery
+
+  driver-app:
+    build: ./driver-app
+    ports:
+      - "3002:3000"
+    networks:
+      - delivery
+
+  postgres:
+    image: postgis/postgis:15-3.3-alpine
+    environment:
+      POSTGRES_USER: delivery
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: delivery
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - delivery
+
+  redis:
+    image: redis:alpine
+    networks:
+      - delivery
+
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    networks:
+      - delivery
+
+networks:
+  delivery:
+    driver: bridge
+
+volumes:
+  postgres_data:

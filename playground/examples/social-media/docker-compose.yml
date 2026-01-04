@@ -1,0 +1,78 @@
+version: '3.8'
+
+services:
+  api:
+    build: ./api
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgres://social:password@postgres:5432/social
+      - REDIS_URL=redis://redis:6379
+      - ELASTICSEARCH_URL=http://elasticsearch:9200
+      - MINIO_ENDPOINT=minio:9000
+    depends_on:
+      - postgres
+      - redis
+      - elasticsearch
+      - minio
+    networks:
+      - social
+
+  websocket:
+    build: ./websocket
+    ports:
+      - "8001:8001"
+    environment:
+      - REDIS_URL=redis://redis:6379
+    networks:
+      - social
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "3000:3000"
+    networks:
+      - social
+
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: social
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: social
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - social
+
+  redis:
+    image: redis:alpine
+    networks:
+      - social
+
+  elasticsearch:
+    image: elasticsearch:8.11.0
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+    networks:
+      - social
+
+  minio:
+    image: minio/minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    volumes:
+      - minio_data:/data
+    networks:
+      - social
+
+networks:
+  social:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  minio_data:
