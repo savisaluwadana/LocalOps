@@ -1,0 +1,60 @@
+version: '3.8'
+
+services:
+  api:
+    build: ./api
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgres://banking:password@postgres:5432/banking
+      - REDIS_URL=redis://redis:6379
+      - RABBITMQ_URL=amqp://rabbitmq:5672
+    depends_on:
+      - postgres
+      - redis
+      - rabbitmq
+    networks:
+      - banking
+
+  transaction-processor:
+    build: ./processor
+    environment:
+      - DATABASE_URL=postgres://banking:password@postgres:5432/banking
+      - RABBITMQ_URL=amqp://rabbitmq:5672
+    networks:
+      - banking
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "3000:3000"
+    networks:
+      - banking
+
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: banking
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: banking
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - banking
+
+  redis:
+    image: redis:alpine
+    networks:
+      - banking
+
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    networks:
+      - banking
+
+networks:
+  banking:
+    driver: bridge
+
+volumes:
+  postgres_data:

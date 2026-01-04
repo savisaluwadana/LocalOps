@@ -1,0 +1,78 @@
+version: '3.8'
+
+services:
+  api:
+    build: ./api
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgres://video:password@postgres:5432/video
+      - REDIS_URL=redis://redis:6379
+      - MINIO_ENDPOINT=minio:9000
+      - RABBITMQ_URL=amqp://rabbitmq:5672
+    depends_on:
+      - postgres
+      - redis
+      - minio
+    networks:
+      - video
+
+  transcoder:
+    build: ./transcoder
+    environment:
+      - RABBITMQ_URL=amqp://rabbitmq:5672
+      - MINIO_ENDPOINT=minio:9000
+    depends_on:
+      - rabbitmq
+      - minio
+    networks:
+      - video
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "3000:3000"
+    networks:
+      - video
+
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: video
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: video
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - video
+
+  redis:
+    image: redis:alpine
+    networks:
+      - video
+
+  minio:
+    image: minio/minio
+    command: server /data --console-address ":9001"
+    ports:
+      - "9000:9000"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    volumes:
+      - minio_data:/data
+    networks:
+      - video
+
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    networks:
+      - video
+
+networks:
+  video:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  minio_data:

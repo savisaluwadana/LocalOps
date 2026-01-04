@@ -1,0 +1,45 @@
+version: '3.8'
+
+services:
+  api:
+    build: ./api
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgres://survey:password@postgres:5432/survey
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - survey
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "3000:3000"
+    networks:
+      - survey
+
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: survey
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: survey
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - survey
+
+  redis:
+    image: redis:alpine
+    networks:
+      - survey
+
+networks:
+  survey:
+    driver: bridge
+
+volumes:
+  postgres_data:

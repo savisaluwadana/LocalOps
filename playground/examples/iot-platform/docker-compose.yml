@@ -1,0 +1,80 @@
+version: '3.8'
+
+services:
+  api:
+    build: ./api
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgres://iot:password@postgres:5432/iot
+      - TIMESCALE_URL=postgres://iot:password@timescale:5432/iot
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      - postgres
+      - timescale
+      - redis
+    networks:
+      - iot
+
+  mqtt-broker:
+    image: eclipse-mosquitto:latest
+    ports:
+      - "1883:1883"
+      - "9001:9001"
+    volumes:
+      - ./mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf
+    networks:
+      - iot
+
+  data-processor:
+    build: ./processor
+    environment:
+      - MQTT_URL=mqtt://mqtt-broker:1883
+      - TIMESCALE_URL=postgres://iot:password@timescale:5432/iot
+    depends_on:
+      - mqtt-broker
+      - timescale
+    networks:
+      - iot
+
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: iot
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: iot
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - iot
+
+  timescale:
+    image: timescale/timescaledb-ha:pg15-latest
+    environment:
+      POSTGRES_USER: iot
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: iot
+    volumes:
+      - timescale_data:/home/postgres/pgdata/data
+    networks:
+      - iot
+
+  redis:
+    image: redis:alpine
+    networks:
+      - iot
+
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3000:3000"
+    networks:
+      - iot
+
+networks:
+  iot:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  timescale_data:

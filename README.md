@@ -1,6 +1,6 @@
 # Local DevOps Playground
 
-A comprehensive local environment with **39 hands-on projects** and in-depth documentation.
+A comprehensive local environment with **48 hands-on projects** and in-depth documentation.
 
 ## 🚀 Quick Start
 
@@ -21,68 +21,73 @@ brew install orbstack terraform ansible kubectl helm
 
 ---
 
-## 🎯 39 Example Projects
+## 🎯 48 Example Projects
 
-### 🏢 Real-World Applications (17)
+### 🏢 Enterprise Applications (26)
 | Project | Description |
 |---------|-------------|
-| `ecommerce-platform/` | Full e-commerce + CI/CD pipelines |
-| `pos-system/` | Point of Sale system |
-| `inventory-management/` | Warehouse & stock tracking |
+| `ecommerce-platform/` | Full e-commerce + CI/CD |
+| `pos-system/` | Point of Sale |
+| `inventory-management/` | Warehouse & stock |
 | `blog-platform/` | Multi-tenant CMS |
-| `booking-system/` | Appointments & reservations |
-| `url-shortener/` | Link shortening + analytics |
-| `task-queue/` | BullMQ job processing |
-| `notification-service/` | Email/SMS/Push/Webhooks |
-| `realtime-chat/` | WebSocket + Redis PubSub |
-| `file-storage/` | Multipart uploads + CDN |
-| `payment-gateway/` | Stripe/PayPal integration |
-| `auth-service/` | JWT, OAuth, MFA |
+| `booking-system/` | Appointments |
+| `url-shortener/` | Link shortening |
+| `task-queue/` | Job processing |
+| `notification-service/` | Multi-channel alerts |
+| `realtime-chat/` | WebSocket chat |
+| `file-storage/` | Uploads + CDN |
+| `payment-gateway/` | Stripe/PayPal |
+| `auth-service/` | JWT/OAuth/MFA |
 | `email-service/` | Transactional email |
-| `search-service/` | Elasticsearch full-text |
-| `event-streaming/` | Apache Kafka platform |
+| `search-service/` | Elasticsearch |
+| `event-streaming/` | Kafka platform |
+| `hr-system/` | HR & payroll |
+| `crm-system/` | Customer relations |
+| `helpdesk-system/` | IT ticketing |
+| `analytics-dashboard/` | BI dashboards |
+| `lms-platform/` | Learning management |
+| `food-delivery/` | Delivery platform |
+| `project-management/` | Team collaboration |
+| `social-media/` | Social network |
+| `logistics-fleet/` | Fleet tracking |
 | `microservices/` | 3 services + Gateway |
 | `webapp/` | Flask full-stack |
 
-### 🔧 Infrastructure Services (9)
+### 🔧 Infrastructure Services (11)
 | Project | Description |
 |---------|-------------|
 | `api-gateway/` | Kong rate limiting |
-| `rate-limiter/` | Redis distributed limiting |
-| `service-discovery/` | Consul + Fabio LB |
-| `config-management/` | Dynamic config server |
-| `backup-service/` | Scheduled encrypted backups |
+| `rate-limiter/` | Redis limiting |
+| `service-discovery/` | Consul + Fabio |
+| `config-management/` | Dynamic config |
+| `backup-service/` | Scheduled backups |
 | `health-checker/` | Uptime monitoring |
-| `cron-manager/` | Distributed cron jobs |
-| `ssl-manager/` | Let's Encrypt automation |
-| `api-docs/` | Swagger/ReDoc/Prism |
+| `cron-manager/` | Distributed cron |
+| `ssl-manager/` | Let's Encrypt |
+| `api-docs/` | Swagger/ReDoc |
+| `tracing-service/` | Jaeger tracing |
+| `metrics-dashboard/` | Prometheus/Grafana |
 
-### 📊 Observability (3)
+### 🚀 Deployment & DevOps (7)
 | Project | Description |
 |---------|-------------|
-| `metrics-dashboard/` | Prometheus + Grafana |
-| `log-aggregation/` | ELK Stack |
-| `tracing-service/` | Jaeger distributed tracing |
-
-### 🚀 Deployment Strategies (4)
-| Project | Description |
-|---------|-------------|
-| `blue-green/` | Zero-downtime switching |
+| `blue-green/` | Zero-downtime |
 | `canary-deployment/` | Gradual rollout |
-| `gitops-example/` | ArgoCD + Kustomize |
-| `auto-scaling/` | Kubernetes HPA |
-
-### 🛠 DevOps & CI/CD (3)
-| Project | Description |
-|---------|-------------|
+| `gitops-example/` | ArgoCD |
+| `auto-scaling/` | K8s HPA |
 | `infra-automation/` | Terraform → Ansible |
 | `database-migrations/` | Flyway SQL |
 | `cicd-pipeline/` | Jenkins pipelines |
 
+### 📊 Observability (1)
+| Project | Description |
+|---------|-------------|
+| `log-aggregation/` | ELK Stack |
+
 ### 🧪 Testing & Resilience (3)
 | Project | Description |
 |---------|-------------|
-| `load-testing/` | k6 performance tests |
+| `load-testing/` | k6 performance |
 | `chaos-engineering/` | Failure injection |
 | `feature-flags/` | Unleash toggles |
 
@@ -90,8 +95,8 @@ brew install orbstack terraform ansible kubectl helm
 
 ## 📋 Requirements
 
-- **macOS** with OrbStack
-- **16GB RAM**, 80GB disk
+- **macOS** with OrbStack  
+- **16GB RAM**, 100GB disk
 
 ## 📝 License
 MIT

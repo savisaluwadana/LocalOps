@@ -1,0 +1,61 @@
+version: '3.8'
+
+services:
+  api:
+    build: ./api
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgres://realestate:password@postgres:5432/realestate
+      - ELASTICSEARCH_URL=http://elasticsearch:9200
+      - MINIO_ENDPOINT=minio:9000
+    depends_on:
+      - postgres
+      - elasticsearch
+    networks:
+      - realestate
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "3000:3000"
+    networks:
+      - realestate
+
+  postgres:
+    image: postgis/postgis:15-3.3-alpine
+    environment:
+      POSTGRES_USER: realestate
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: realestate
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - realestate
+
+  elasticsearch:
+    image: elasticsearch:8.11.0
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+    networks:
+      - realestate
+
+  minio:
+    image: minio/minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    volumes:
+      - minio_data:/data
+    networks:
+      - realestate
+
+networks:
+  realestate:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  minio_data:

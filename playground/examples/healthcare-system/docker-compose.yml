@@ -1,0 +1,55 @@
+version: '3.8'
+
+services:
+  api:
+    build: ./api
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgres://health:password@postgres:5432/health
+      - REDIS_URL=redis://redis:6379
+      - ENCRYPTION_KEY=hipaa-encryption-key
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - healthcare
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "3000:3000"
+    networks:
+      - healthcare
+
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: health
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: health
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - healthcare
+
+  redis:
+    image: redis:alpine
+    networks:
+      - healthcare
+
+  minio:
+    image: minio/minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    networks:
+      - healthcare
+
+networks:
+  healthcare:
+    driver: bridge
+
+volumes:
+  postgres_data:

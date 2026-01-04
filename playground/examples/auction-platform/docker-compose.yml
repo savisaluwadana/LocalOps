@@ -1,0 +1,62 @@
+version: '3.8'
+
+services:
+  api:
+    build: ./api
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgres://auction:password@postgres:5432/auction
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - auction
+
+  websocket:
+    build: ./websocket
+    ports:
+      - "8001:8001"
+    environment:
+      - REDIS_URL=redis://redis:6379
+    networks:
+      - auction
+
+  scheduler:
+    build: ./scheduler
+    environment:
+      - DATABASE_URL=postgres://auction:password@postgres:5432/auction
+      - REDIS_URL=redis://redis:6379
+    networks:
+      - auction
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "3000:3000"
+    networks:
+      - auction
+
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: auction
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: auction
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - auction
+
+  redis:
+    image: redis:alpine
+    networks:
+      - auction
+
+networks:
+  auction:
+    driver: bridge
+
+volumes:
+  postgres_data:

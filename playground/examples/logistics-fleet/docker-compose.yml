@@ -1,0 +1,73 @@
+version: '3.8'
+
+services:
+  api:
+    build: ./api
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgres://logistics:password@postgres:5432/logistics
+      - REDIS_URL=redis://redis:6379
+      - RABBITMQ_URL=amqp://rabbitmq:5672
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - logistics
+
+  tracking-service:
+    build: ./tracking
+    ports:
+      - "8001:8001"
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - TIMESCALE_URL=postgres://logistics:password@timescale:5432/logistics
+    networks:
+      - logistics
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "3000:3000"
+    networks:
+      - logistics
+
+  postgres:
+    image: postgis/postgis:15-3.3-alpine
+    environment:
+      POSTGRES_USER: logistics
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: logistics
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - logistics
+
+  timescale:
+    image: timescale/timescaledb-ha:pg15-latest
+    environment:
+      POSTGRES_USER: logistics
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: logistics
+    volumes:
+      - timescale_data:/home/postgres/pgdata/data
+    networks:
+      - logistics
+
+  redis:
+    image: redis:alpine
+    networks:
+      - logistics
+
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    networks:
+      - logistics
+
+networks:
+  logistics:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  timescale_data:
