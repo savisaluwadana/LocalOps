@@ -1,6 +1,6 @@
 # Local DevOps Playground
 
-A comprehensive local environment with **48 hands-on projects** and in-depth documentation.
+A comprehensive local environment with **56 hands-on projects** and in-depth documentation.
 
 ## 🚀 Quick Start
 
@@ -21,82 +21,49 @@ brew install orbstack terraform ansible kubectl helm
 
 ---
 
-## 🎯 48 Example Projects
+## 🎯 56 Example Projects
 
-### 🏢 Enterprise Applications (26)
-| Project | Description |
-|---------|-------------|
-| `ecommerce-platform/` | Full e-commerce + CI/CD |
-| `pos-system/` | Point of Sale |
-| `inventory-management/` | Warehouse & stock |
-| `blog-platform/` | Multi-tenant CMS |
-| `booking-system/` | Appointments |
-| `url-shortener/` | Link shortening |
-| `task-queue/` | Job processing |
-| `notification-service/` | Multi-channel alerts |
-| `realtime-chat/` | WebSocket chat |
-| `file-storage/` | Uploads + CDN |
-| `payment-gateway/` | Stripe/PayPal |
-| `auth-service/` | JWT/OAuth/MFA |
-| `email-service/` | Transactional email |
-| `search-service/` | Elasticsearch |
-| `event-streaming/` | Kafka platform |
-| `hr-system/` | HR & payroll |
-| `crm-system/` | Customer relations |
-| `helpdesk-system/` | IT ticketing |
-| `analytics-dashboard/` | BI dashboards |
-| `lms-platform/` | Learning management |
-| `food-delivery/` | Delivery platform |
-| `project-management/` | Team collaboration |
-| `social-media/` | Social network |
-| `logistics-fleet/` | Fleet tracking |
-| `microservices/` | 3 services + Gateway |
-| `webapp/` | Flask full-stack |
+### 🏢 Enterprise Applications (34)
+
+**E-Commerce & Retail**
+`ecommerce-platform` • `pos-system` • `inventory-management` • `auction-platform`
+
+**Content & Media**
+`blog-platform` • `video-streaming` • `social-media` • `lms-platform`
+
+**Business Operations**
+`hr-system` • `crm-system` • `helpdesk-system` • `project-management` • `analytics-dashboard`
+
+**Bookings & Logistics**
+`booking-system` • `food-delivery` • `ride-sharing` • `logistics-fleet` • `real-estate`
+
+**Finance & Healthcare**
+`banking-system` • `payment-gateway` • `healthcare-system`
+
+**Communication & Utilities**
+`realtime-chat` • `notification-service` • `email-service` • `survey-platform`
+
+**Core Services**
+`url-shortener` • `task-queue` • `file-storage` • `auth-service` • `search-service` • `event-streaming` • `microservices` • `webapp` • `iot-platform`
 
 ### 🔧 Infrastructure Services (11)
-| Project | Description |
-|---------|-------------|
-| `api-gateway/` | Kong rate limiting |
-| `rate-limiter/` | Redis limiting |
-| `service-discovery/` | Consul + Fabio |
-| `config-management/` | Dynamic config |
-| `backup-service/` | Scheduled backups |
-| `health-checker/` | Uptime monitoring |
-| `cron-manager/` | Distributed cron |
-| `ssl-manager/` | Let's Encrypt |
-| `api-docs/` | Swagger/ReDoc |
-| `tracing-service/` | Jaeger tracing |
-| `metrics-dashboard/` | Prometheus/Grafana |
+`api-gateway` • `rate-limiter` • `service-discovery` • `config-management` • `backup-service` • `health-checker` • `cron-manager` • `ssl-manager` • `api-docs` • `tracing-service` • `metrics-dashboard`
 
 ### 🚀 Deployment & DevOps (7)
-| Project | Description |
-|---------|-------------|
-| `blue-green/` | Zero-downtime |
-| `canary-deployment/` | Gradual rollout |
-| `gitops-example/` | ArgoCD |
-| `auto-scaling/` | K8s HPA |
-| `infra-automation/` | Terraform → Ansible |
-| `database-migrations/` | Flyway SQL |
-| `cicd-pipeline/` | Jenkins pipelines |
+`blue-green` • `canary-deployment` • `gitops-example` • `auto-scaling` • `infra-automation` • `database-migrations` • `cicd-pipeline`
 
 ### 📊 Observability (1)
-| Project | Description |
-|---------|-------------|
-| `log-aggregation/` | ELK Stack |
+`log-aggregation`
 
 ### 🧪 Testing & Resilience (3)
-| Project | Description |
-|---------|-------------|
-| `load-testing/` | k6 performance |
-| `chaos-engineering/` | Failure injection |
-| `feature-flags/` | Unleash toggles |
+`load-testing` • `chaos-engineering` • `feature-flags`
 
 ---
 
 ## 📋 Requirements
 
 - **macOS** with OrbStack  
-- **16GB RAM**, 100GB disk
+- **16GB RAM**, 120GB disk
 
 ## 📝 License
 MIT
