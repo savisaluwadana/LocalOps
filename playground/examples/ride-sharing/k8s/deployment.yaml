@@ -1,0 +1,88 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ride-api
+spec:
+  replicas: 5
+  selector:
+    matchLabels:
+      app: ride-api
+  template:
+    metadata:
+      labels:
+        app: ride-api
+    spec:
+      containers:
+        - name: api
+          image: ride-api:latest
+          ports:
+            - containerPort: 8000
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: ride-secrets
+                  key: database-url
+            - name: REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: ride-secrets
+                  key: redis-url
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "200m"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ride-matching-service
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: ride-matching
+  template:
+    metadata:
+      labels:
+        app: ride-matching
+    spec:
+      containers:
+        - name: matching
+          image: ride-matching:latest
+          env:
+            - name: REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: ride-secrets
+                  key: redis-url
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ride-api
+spec:
+  selector:
+    app: ride-api
+  ports:
+    - port: 80
+      targetPort: 8000
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: ride-api-hpa
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: ride-api
+  minReplicas: 5
+  maxReplicas: 100
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 50

@@ -1,0 +1,73 @@
+name: Ride Sharing CI/CD
+
+on:
+  push:
+    branches: [main, develop]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgis/postgis:15-3.3-alpine
+        env:
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: test
+        ports:
+          - 5432:5432
+      redis:
+        image: redis:alpine
+        ports:
+          - 6379:6379
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+      - run: cd api && npm ci && npm test --if-present
+
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v5
+        with:
+          context: ./api
+          push: true
+          tags: ghcr.io/${{ github.repository }}/ride-api:${{ github.sha }}
+
+  deploy-staging:
+    needs: build
+    if: github.ref == 'refs/heads/develop'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run Ansible
+        uses: dawidd6/action-ansible-playbook@v2
+        with:
+          playbook: ansible/deploy.yml
+          inventory: ansible/inventory/staging
+          key: ${{ secrets.SSH_KEY }}
+          options: |
+            -e image_tag=ghcr.io/${{ github.repository }}/ride-api:${{ github.sha }}
+            -e environment=staging
+
+  deploy-production:
+    needs: build
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/k8s-deploy@v4
+        with:
+          namespace: ride-prod
+          manifests: k8s/production/
+          images: ghcr.io/${{ github.repository }}/ride-api:${{ github.sha }}

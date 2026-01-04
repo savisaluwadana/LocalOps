@@ -1,0 +1,86 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: lms-api
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: lms-api
+  template:
+    metadata:
+      labels:
+        app: lms-api
+    spec:
+      containers:
+        - name: api
+          image: lms-api:latest
+          ports:
+            - containerPort: 8000
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: lms-secrets
+                  key: database-url
+            - name: REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: lms-secrets
+                  key: redis-url
+            - name: S3_BUCKET
+              value: lms-content
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "200m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: lms-api
+spec:
+  selector:
+    app: lms-api
+  ports:
+    - port: 80
+      targetPort: 8000
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: lms-api
+  annotations:
+    kubernetes.io/ingress.class: nginx
+    nginx.ingress.kubernetes.io/proxy-body-size: "100m"
+spec:
+  rules:
+    - host: api.lms.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: lms-api
+                port:
+                  number: 80
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: lms-certificate-generator
+spec:
+  schedule: "0 */6 * * *"
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+            - name: cert-gen
+              image: lms-api:latest
+              command: ["node", "scripts/generate-certificates.js"]
+          restartPolicy: OnFailure
