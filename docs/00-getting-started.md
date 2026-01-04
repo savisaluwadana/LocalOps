@@ -108,6 +108,29 @@ The roadmap is divided into **8 Phases**. It is recommended to follow them in or
 | **K8s Internals** | CNI, CSI, CRI, etcd, Operator Pattern. | [31-kubernetes-internals.md](31-kubernetes-internals.md) | Use `crictl` |
 | **Linux Internals** | Namespaces, Cgroups, Syscalls, eBPF. | [32-linux-internals.md](32-linux-internals.md) | Use `strace` |
 | **Distributed Sys** | CAP Theorem, Raft, Consistency Models. | [33-distributed-systems.md](33-distributed-systems.md) | Design an HA system |
+| **DB Internals** | LSM vs B-Tree, Isolation Levels, Sharding. | [34-database-internals.md](34-database-internals.md) | Tune PostgreSQL |
+| **Policy as Code** | OPA, Rego, Kyverno, Compliance. | [35-policy-as-code.md](35-policy-as-code.md) | Write OPA Policy |
+| **System Design** | Availability, Multi-Region, Resiliency. | [36-system-design.md](36-system-design.md) | Architect DR Plan |
+
+---
+
+## 🧠 Phase 10: Chaos & Leadership (Principal Level)
+*Technical excellence is not enough. You must lead.*
+
+| Topic | Description | Theory | Practice |
+|-------|-------------|--------|----------|
+| **Chaos Eng** | Breaking things on purpose. Game Days. | [37-chaos-engineering.md](37-chaos-engineering.md) | Run Chaos Mesh |
+| **Staff+ Skills** | RFCs, Influence, Mentorship. | [38-staff-plus-skills.md](38-staff-plus-skills.md) | Write an RFC |
+| **The Future** | LLMOps, Wasm, GreenOps. | [39-future-trends.md](39-future-trends.md) | Run a Wasm App |
+
+---
+
+## 🤖 Phase 11: MLOps & AI Engineering (Specialization)
+*Bridging the gap between Data Science and Operations.*
+
+| Topic | Description | Theory | Practice |
+|-------|-------------|--------|----------|
+| **MLOps Theory** | Lifecycle, Feature Stores, Drift. | [40-mlops.md](40-mlops.md) | Build Churn Pipe |
 
 ---
 
