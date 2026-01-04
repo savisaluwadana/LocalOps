@@ -1,0 +1,30 @@
+version: '3.8'
+
+services:
+  api:
+    build: ./api
+    ports:
+      - "8000:8000"
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - DEFAULT_LIMIT=100
+      - DEFAULT_WINDOW=60
+    depends_on:
+      - redis
+    networks:
+      - ratelimit
+
+  redis:
+    image: redis:alpine
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    networks:
+      - ratelimit
+
+networks:
+  ratelimit:
+    driver: bridge
+
+volumes:
+  redis_data:

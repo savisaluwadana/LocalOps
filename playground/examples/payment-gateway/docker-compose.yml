@@ -1,0 +1,63 @@
+version: '3.8'
+
+services:
+  api:
+    build: ./api
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgres://payment:password@postgres:5432/payment
+      - REDIS_URL=redis://redis:6379
+      - RABBITMQ_URL=amqp://rabbitmq:5672
+      - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY:-sk_test_fake}
+      - STRIPE_WEBHOOK_SECRET=${STRIPE_WEBHOOK_SECRET:-whsec_fake}
+      - PAYPAL_CLIENT_ID=${PAYPAL_CLIENT_ID:-fake}
+      - PAYPAL_SECRET=${PAYPAL_SECRET:-fake}
+    depends_on:
+      - postgres
+      - redis
+      - rabbitmq
+    networks:
+      - payment
+
+  webhook-worker:
+    build: ./worker
+    environment:
+      - DATABASE_URL=postgres://payment:password@postgres:5432/payment
+      - RABBITMQ_URL=amqp://rabbitmq:5672
+    depends_on:
+      - postgres
+      - rabbitmq
+    networks:
+      - payment
+
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: payment
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: payment
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./database/init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - payment
+
+  redis:
+    image: redis:alpine
+    networks:
+      - payment
+
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    ports:
+      - "15672:15672"
+    networks:
+      - payment
+
+networks:
+  payment:
+    driver: bridge
+
+volumes:
+  postgres_data:

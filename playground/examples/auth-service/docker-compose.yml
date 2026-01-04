@@ -1,0 +1,57 @@
+version: '3.8'
+
+services:
+  api:
+    build: ./api
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgres://auth:password@postgres:5432/auth
+      - REDIS_URL=redis://redis:6379
+      - JWT_SECRET=super-secret-jwt-key
+      - JWT_EXPIRES_IN=15m
+      - REFRESH_TOKEN_EXPIRES_IN=7d
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-fake}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET:-fake}
+      - GITHUB_CLIENT_ID=${GITHUB_CLIENT_ID:-fake}
+      - GITHUB_CLIENT_SECRET=${GITHUB_CLIENT_SECRET:-fake}
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - auth
+
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: auth
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: auth
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./database/init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - auth
+
+  redis:
+    image: redis:alpine
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    networks:
+      - auth
+
+  mailhog:
+    image: mailhog/mailhog
+    ports:
+      - "8025:8025"
+    networks:
+      - auth
+
+networks:
+  auth:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  redis_data:

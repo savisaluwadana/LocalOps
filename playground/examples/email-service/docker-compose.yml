@@ -1,0 +1,59 @@
+version: '3.8'
+
+services:
+  api:
+    build: ./api
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgres://email:password@postgres:5432/email
+      - REDIS_URL=redis://redis:6379
+      - SMTP_HOST=mailhog
+      - SMTP_PORT=1025
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - email
+
+  worker:
+    build: ./worker
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - SMTP_HOST=mailhog
+      - SMTP_PORT=1025
+    depends_on:
+      - redis
+      - mailhog
+    networks:
+      - email
+
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: email
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: email
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - email
+
+  redis:
+    image: redis:alpine
+    networks:
+      - email
+
+  mailhog:
+    image: mailhog/mailhog
+    ports:
+      - "8025:8025"
+    networks:
+      - email
+
+networks:
+  email:
+    driver: bridge
+
+volumes:
+  postgres_data:

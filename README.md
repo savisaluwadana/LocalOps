@@ -1,6 +1,6 @@
 # Local DevOps Playground
 
-A comprehensive local environment with **18 hands-on projects** and in-depth documentation.
+A comprehensive local environment with **23 hands-on projects** and in-depth documentation.
 
 ## 🚀 Quick Start
 
@@ -23,11 +23,12 @@ brew install orbstack terraform ansible kubectl helm
 | [Jenkins](docs/07-jenkins.md) | Pipelines, agents |
 | [Kubernetes](docs/08-kubernetes.md) | Architecture, objects |
 
-### CI/CD Platforms (New!)
+### CI/CD Platforms (Detailed)
 | Doc | Content |
 |-----|---------|
 | [**GitHub Actions**](docs/16-github-actions.md) | Workflows, matrix, reusable actions, self-hosted runners |
 | [**GitLab CI/CD**](docs/17-gitlab-ci.md) | Pipelines, stages, templates, environments |
+| [**CircleCI**](docs/18-circleci.md) | Orbs, caching, parallelism, workspaces |
 
 ### Advanced Topics
 | Doc | Content |
@@ -39,17 +40,22 @@ brew install orbstack terraform ansible kubectl helm
 
 ---
 
-## 🎯 18 Example Projects
+## 🎯 23 Example Projects
 
 ### 🏢 Real-World Applications
-| Project | Description | Start |
-|---------|-------------|-------|
-| **`ecommerce-platform/`** | Full microservices e-commerce (Products, Orders, Payments) + GitHub Actions + GitLab CI | `docker compose up -d` |
-| **`pos-system/`** | Point of Sale with sales, inventory, reporting | `docker compose up -d` |
-| **`inventory-management/`** | Warehouse, stock tracking, purchase orders | `docker compose up -d` |
-| **`blog-platform/`** | Multi-tenant CMS with media, search | `docker compose up -d` |
-| `microservices/` | 3 Node.js services + API Gateway | `docker compose up -d` |
-| `webapp/` | Flask + PostgreSQL + Redis + Prometheus | `docker compose up -d` |
+| Project | Description |
+|---------|-------------|
+| **`ecommerce-platform/`** | Full e-commerce (Products, Orders, Payments) + GitHub Actions + GitLab CI |
+| **`pos-system/`** | Point of Sale: sales, inventory, reports |
+| **`inventory-management/`** | Warehouse, stock tracking, purchase orders |
+| **`blog-platform/`** | Multi-tenant CMS, media, search |
+| **`booking-system/`** | Appointments, distributed locks, notifications |
+| **`url-shortener/`** | Base62 encoding, analytics, Redis cache |
+| **`task-queue/`** | BullMQ workers, scheduling, dashboard |
+| **`notification-service/`** | Email, SMS, push, webhooks |
+| **`realtime-chat/`** | WebSocket, Redis PubSub, MongoDB |
+| `microservices/` | 3 Node.js services + API Gateway |
+| `webapp/` | Flask + PostgreSQL + Redis + Prometheus |
 
 ### 🚀 Deployment Strategies
 | Project | Description |
@@ -80,7 +86,7 @@ brew install orbstack terraform ansible kubectl helm
 ## 📋 Requirements
 
 - **macOS** with OrbStack
-- **16GB RAM**, 40GB disk
+- **16GB RAM**, 50GB disk
 
 ## 📝 License
 MIT
