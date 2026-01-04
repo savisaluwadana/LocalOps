@@ -1,0 +1,35 @@
+---
+- name: Basic Server Setup
+  hosts: all
+  become: yes
+
+  vars:
+    packages:
+      - vim
+      - git
+      - curl
+      - htop
+      - tree
+
+  tasks:
+    - name: Update apt cache
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+
+    - name: Install useful packages
+      apt:
+        name: "{{ packages }}"
+        state: present
+
+    - name: Set timezone to UTC
+      timezone:
+        name: UTC
+
+    - name: Create devops user
+      user:
+        name: devops
+        shell: /bin/bash
+        groups: sudo
+        append: yes
+        create_home: yes
