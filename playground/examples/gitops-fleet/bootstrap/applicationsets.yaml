@@ -1,0 +1,306 @@
+# ArgoCD Root Application (App of Apps Pattern)
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: root-app
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/org/gitops-fleet.git
+    targetRevision: HEAD
+    path: bootstrap
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+---
+# Infrastructure Apps
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: infrastructure
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/org/gitops-fleet.git
+    targetRevision: HEAD
+    path: infrastructure
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+---
+# Cluster Addons ApplicationSet
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: cluster-addons
+  namespace: argocd
+spec:
+  generators:
+    - clusters:
+        selector:
+          matchLabels:
+            argocd.argoproj.io/secret-type: cluster
+  template:
+    metadata:
+      name: '{{name}}-addons'
+      namespace: argocd
+      labels:
+        cluster: '{{name}}'
+        env: '{{metadata.labels.env}}'
+    spec:
+      project: default
+      source:
+        repoURL: https://github.com/org/gitops-fleet.git
+        targetRevision: HEAD
+        path: 'clusters/{{metadata.labels.env}}/{{name}}/addons'
+      destination:
+        server: '{{server}}'
+        namespace: kube-system
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+          - CreateNamespace=true
+---
+# Production Applications ApplicationSet
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: production-apps
+  namespace: argocd
+spec:
+  generators:
+    - matrix:
+        generators:
+          # Clusters
+          - clusters:
+              selector:
+                matchLabels:
+                  env: production
+          # Applications
+          - git:
+              repoURL: https://github.com/org/gitops-fleet.git
+              revision: HEAD
+              directories:
+                - path: apps/production/*
+  template:
+    metadata:
+      name: '{{path.basename}}-{{name}}'
+      namespace: argocd
+      labels:
+        app: '{{path.basename}}'
+        cluster: '{{name}}'
+        env: production
+    spec:
+      project: production
+      source:
+        repoURL: https://github.com/org/gitops-fleet.git
+        targetRevision: HEAD
+        path: '{{path}}'
+        kustomize:
+          commonLabels:
+            cluster: '{{name}}'
+      destination:
+        server: '{{server}}'
+        namespace: '{{path.basename}}'
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+          - CreateNamespace=true
+          - PrunePropagationPolicy=foreground
+---
+# Staging Applications with Progressive Sync
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: staging-apps
+  namespace: argocd
+spec:
+  generators:
+    - clusters:
+        selector:
+          matchLabels:
+            env: staging
+  strategy:
+    type: RollingSync
+    rollingSync:
+      steps:
+        - matchExpressions:
+            - key: region
+              operator: In
+              values: [us-east]
+        - matchExpressions:
+            - key: region
+              operator: In
+              values: [eu-west]
+  template:
+    metadata:
+      name: 'staging-apps-{{name}}'
+    spec:
+      project: staging
+      source:
+        repoURL: https://github.com/org/gitops-fleet.git
+        targetRevision: staging
+        path: apps/staging
+      destination:
+        server: '{{server}}'
+        namespace: apps
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+---
+# Pull Request Generator for Preview Environments
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: pr-preview-apps
+  namespace: argocd
+spec:
+  generators:
+    - pullRequest:
+        github:
+          owner: org
+          repo: application
+          tokenRef:
+            secretName: github-token
+            key: token
+        requeueAfterSeconds: 60
+  template:
+    metadata:
+      name: 'preview-{{branch}}-{{number}}'
+      namespace: argocd
+      labels:
+        app: preview
+        pr: '{{number}}'
+    spec:
+      project: preview
+      source:
+        repoURL: 'https://github.com/org/application.git'
+        targetRevision: '{{head_sha}}'
+        path: kubernetes
+        kustomize:
+          namePrefix: 'pr-{{number}}-'
+          commonLabels:
+            preview: 'true'
+            pr: '{{number}}'
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: 'preview-{{number}}'
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+          - CreateNamespace=true
+---
+# ArgoCD Project for Production
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: production
+  namespace: argocd
+spec:
+  description: Production applications
+  
+  sourceRepos:
+    - 'https://github.com/org/*'
+  
+  destinations:
+    - namespace: '*'
+      server: 'https://production-*.example.com'
+    
+  clusterResourceWhitelist:
+    - group: '*'
+      kind: '*'
+  
+  namespaceResourceBlacklist:
+    - group: ''
+      kind: Secret
+  
+  roles:
+    - name: admin
+      description: Production admins
+      policies:
+        - p, proj:production:admin, applications, *, production/*, allow
+      groups:
+        - platform-team
+        - sre-team
+    
+    - name: developer
+      description: Developers (read-only)
+      policies:
+        - p, proj:production:developer, applications, get, production/*, allow
+        - p, proj:production:developer, applications, sync, production/*, deny
+      groups:
+        - developers
+---
+# Notification Configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: argocd-notifications-cm
+  namespace: argocd
+data:
+  service.slack: |
+    token: $slack-token
+  
+  template.app-sync-succeeded: |
+    message: |
+      :white_check_mark: Application {{.app.metadata.name}} is now running new version.
+      Sync Status: {{.app.status.sync.status}}
+      Health: {{.app.status.health.status}}
+    slack:
+      attachments: |
+        [{
+          "color": "#18be52",
+          "fields": [
+            {"title": "Application", "value": "{{.app.metadata.name}}", "short": true},
+            {"title": "Revision", "value": "{{.app.status.sync.revision}}", "short": true}
+          ]
+        }]
+  
+  template.app-sync-failed: |
+    message: |
+      :x: Application {{.app.metadata.name}} sync failed.
+    slack:
+      attachments: |
+        [{
+          "color": "#E96D76",
+          "fields": [
+            {"title": "Application", "value": "{{.app.metadata.name}}", "short": true},
+            {"title": "Error", "value": "{{.app.status.operationState.message}}", "short": false}
+          ]
+        }]
+  
+  trigger.on-sync-succeeded: |
+    - when: app.status.operationState.phase in ['Succeeded']
+      send: [app-sync-succeeded]
+  
+  trigger.on-sync-failed: |
+    - when: app.status.operationState.phase in ['Error', 'Failed']
+      send: [app-sync-failed]
+
+  subscriptions: |
+    - recipients:
+        - slack:platform-alerts
+      triggers:
+        - on-sync-succeeded
+        - on-sync-failed

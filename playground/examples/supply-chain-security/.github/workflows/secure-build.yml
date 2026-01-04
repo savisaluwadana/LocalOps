@@ -1,0 +1,262 @@
+name: Secure Build Pipeline
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write  # Keyless signing
+  security-events: write
+  attestations: write
+
+jobs:
+  # ==============================================================================
+  # BUILD
+  # ==============================================================================
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      image: ${{ steps.image.outputs.image }}
+      digest: ${{ steps.build-push.outputs.digest }}
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=sha,prefix=
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+
+      - name: Build and push
+        id: build-push
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          sbom: true
+          provenance: true
+
+      - name: Output image
+        id: image
+        run: |
+          echo "image=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.build-push.outputs.digest }}" >> $GITHUB_OUTPUT
+
+  # ==============================================================================
+  # SBOM GENERATION
+  # ==============================================================================
+  sbom:
+    needs: build
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Generate SBOM with Syft
+        uses: anchore/sbom-action@v0
+        with:
+          image: ${{ needs.build.outputs.image }}
+          format: spdx-json
+          output-file: sbom.spdx.json
+          upload-artifact: true
+
+      - name: Generate CycloneDX SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          image: ${{ needs.build.outputs.image }}
+          format: cyclonedx-json
+          output-file: sbom.cyclonedx.json
+
+      - name: Upload SBOM as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom
+          path: |
+            sbom.spdx.json
+            sbom.cyclonedx.json
+
+  # ==============================================================================
+  # VULNERABILITY SCANNING
+  # ==============================================================================
+  scan:
+    needs: build
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Scan with Grype
+        uses: anchore/scan-action@v3
+        id: grype
+        with:
+          image: ${{ needs.build.outputs.image }}
+          fail-build: true
+          severity-cutoff: high
+          output-format: sarif
+
+      - name: Upload SARIF
+        uses: github/codeql-action/upload-sarif@v2
+        with:
+          sarif_file: ${{ steps.grype.outputs.sarif }}
+
+      - name: Scan with Trivy
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ needs.build.outputs.image }}
+          format: 'table'
+          exit-code: '1'
+          ignore-unfixed: true
+          vuln-type: 'os,library'
+          severity: 'CRITICAL,HIGH'
+
+  # ==============================================================================
+  # SIGNING
+  # ==============================================================================
+  sign:
+    needs: [build, scan]
+    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request'
+    
+    steps:
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Login to Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Sign image with Cosign (Keyless)
+        run: |
+          cosign sign --yes \
+            --oidc-issuer="https://token.actions.githubusercontent.com" \
+            ${{ needs.build.outputs.image }}
+        env:
+          COSIGN_EXPERIMENTAL: "true"
+
+      - name: Verify signature
+        run: |
+          cosign verify \
+            --certificate-identity-regexp="https://github.com/${{ github.repository }}/*" \
+            --certificate-oidc-issuer="https://token.actions.githubusercontent.com" \
+            ${{ needs.build.outputs.image }}
+
+  # ==============================================================================
+  # ATTESTATIONS
+  # ==============================================================================
+  attest:
+    needs: [build, sbom, sign]
+    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request'
+    
+    steps:
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Download SBOM
+        uses: actions/download-artifact@v4
+        with:
+          name: sbom
+
+      - name: Login to Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Attest SBOM
+        run: |
+          cosign attest --yes \
+            --predicate sbom.spdx.json \
+            --type spdx \
+            ${{ needs.build.outputs.image }}
+
+      - name: Generate SLSA Provenance
+        uses: slsa-framework/slsa-github-generator/.github/workflows/generator_container_slsa3.yml@v1.9.0
+        with:
+          image: ${{ needs.build.outputs.image }}
+          digest: ${{ needs.build.outputs.digest }}
+          registry-username: ${{ github.actor }}
+          registry-password: ${{ secrets.GITHUB_TOKEN }}
+
+  # ==============================================================================
+  # POLICY CHECK
+  # ==============================================================================
+  policy:
+    needs: [build, attest]
+    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request'
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Verify Attestations
+        run: |
+          # Verify SBOM attestation exists
+          cosign verify-attestation \
+            --type spdx \
+            --certificate-identity-regexp="https://github.com/${{ github.repository }}/*" \
+            --certificate-oidc-issuer="https://token.actions.githubusercontent.com" \
+            ${{ needs.build.outputs.image }}
+
+      - name: Check Policy with OPA
+        run: |
+          # Download attestations
+          cosign download attestation ${{ needs.build.outputs.image }} > attestations.json
+          
+          # Evaluate policy
+          opa eval \
+            --data policies/supply-chain.rego \
+            --input attestations.json \
+            "data.supplychain.allow"
+
+  # ==============================================================================
+  # DEPLOY (if all checks pass)
+  # ==============================================================================
+  deploy:
+    needs: [policy]
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    environment: production
+    
+    steps:
+      - name: Deploy to Kubernetes
+        run: |
+          echo "Deploying verified image: ${{ needs.build.outputs.image }}"
+          # kubectl set image deployment/app app=${{ needs.build.outputs.image }}
