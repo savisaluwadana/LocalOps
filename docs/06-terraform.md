@@ -1,537 +1,644 @@
-# Terraform Fundamentals
+# Terraform In-Depth Theory
 
-## What is Terraform?
+## Infrastructure as Code Principles
 
-Terraform is an **Infrastructure as Code (IaC)** tool that lets you define, provision, and manage infrastructure using declarative configuration files. You describe what you want, and Terraform figures out how to create it.
+### The IaC Paradigm
 
-### Why Infrastructure as Code?
+**Infrastructure as Code** treats infrastructure the same way developers treat application code:
 
-| Traditional | IaC (Terraform) |
-|-------------|-----------------|
-| Click in web consoles | Write code |
-| Undocumented steps | Version-controlled |
-| Inconsistent environments | Reproducible |
-| Manual scaling | Automated |
+| Traditional Ops | Infrastructure as Code |
+|-----------------|------------------------|
+| Manual changes via UI | Declarative config files |
+| Undocumented "click ops" | Version controlled |
+| Inconsistent environments | Reproducible deployments |
+| Risky changes | Safe plan → apply workflow |
 | Tribal knowledge | Self-documenting |
 
-### Terraform vs Other Tools
+### Declarative vs Imperative
 
-| Tool | Type | Use Case |
-|------|------|----------|
-| **Terraform** | Provisioning | Create infrastructure (servers, networks) |
-| **Ansible** | Configuration | Configure existing infrastructure |
-| **Docker** | Packaging | Package applications |
-| **Kubernetes** | Orchestration | Run containerized applications |
+**Imperative** (how to do it):
+```bash
+# Shell script - step by step
+aws ec2 create-vpc --cidr-block 10.0.0.0/16
+aws ec2 create-subnet --vpc-id vpc-123 --cidr-block 10.0.1.0/24
+aws ec2 run-instances --image-id ami-123 --count 3
+```
 
-> **Key Insight**: Terraform **creates** the servers, Ansible **configures** them, Docker **packages** apps, Kubernetes **runs** them.
+**Declarative** (what you want):
+```hcl
+# Terraform - describe desired state
+resource "aws_vpc" "main" {
+  cidr_block = "10.0.0.0/16"
+}
+
+resource "aws_subnet" "public" {
+  vpc_id     = aws_vpc.main.id
+  cidr_block = "10.0.1.0/24"
+}
+
+resource "aws_instance" "web" {
+  count         = 3
+  ami           = "ami-123"
+  instance_type = "t3.micro"
+  subnet_id     = aws_subnet.public.id
+}
+```
 
 ---
 
-## Core Concepts
+## How Terraform Works
 
-### 1. Providers
+### The Core Workflow
 
-**Providers** are plugins that allow Terraform to interact with APIs. Each cloud/service has its own provider.
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                    TERRAFORM WORKFLOW                                │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                      │
+│   ┌──────────────┐                                                   │
+│   │  .tf Files   │ ◄── Your configuration (desired state)           │
+│   └──────┬───────┘                                                   │
+│          │ terraform init                                            │
+│          ▼                                                           │
+│   ┌──────────────┐                                                   │
+│   │   Providers  │ ◄── Downloaded plugins (AWS, Docker, K8s)        │
+│   └──────┬───────┘                                                   │
+│          │ terraform plan                                            │
+│          ▼                                                           │
+│   ┌──────────────┐     ┌──────────────┐                             │
+│   │  Execution   │────►│   Provider   │◄── Real world resources     │
+│   │    Plan      │     │     APIs     │                              │
+│   └──────┬───────┘     └──────────────┘                             │
+│          │ terraform apply                                           │
+│          ▼                                                           │
+│   ┌──────────────┐                                                   │
+│   │    State     │ ◄── terraform.tfstate (current known state)      │
+│   │    File      │                                                   │
+│   └──────────────┘                                                   │
+│                                                                      │
+└─────────────────────────────────────────────────────────────────────┘
+```
 
-```hcl
-# Docker provider (local)
-terraform {
-  required_providers {
-    docker = {
-      source  = "kreuzwerker/docker"
-      version = "~> 3.0.1"
+### State Management Deep Dive
+
+The **state file** is Terraform's source of truth about what exists:
+
+```json
+{
+  "version": 4,
+  "terraform_version": "1.6.0",
+  "resources": [
+    {
+      "mode": "managed",
+      "type": "docker_container",
+      "name": "nginx",
+      "provider": "provider[\"registry.terraform.io/kreuzwerker/docker\"]",
+      "instances": [
+        {
+          "attributes": {
+            "id": "abc123...",
+            "name": "my-nginx",
+            "image": "sha256:def456...",
+            "ports": [{"internal": 80, "external": 8080}]
+          }
+        }
+      ]
     }
-  }
-}
-
-provider "docker" {
-  host = "unix:///var/run/docker.sock"
-}
-
-# AWS provider example
-provider "aws" {
-  region = "us-west-2"
-}
-
-# Kubernetes provider example
-provider "kubernetes" {
-  config_path = "~/.kube/config"
+  ]
 }
 ```
 
-### 2. Resources
+**State operations:**
+```bash
+# View current state
+terraform show
 
-**Resources** are the building blocks - the actual infrastructure to create.
+# List resources in state
+terraform state list
+
+# Show specific resource
+terraform state show docker_container.nginx
+
+# Move resource to different name
+terraform state mv docker_container.old docker_container.new
+
+# Remove from state (doesn't destroy)
+terraform state rm docker_container.nginx
+
+# Import existing resource
+terraform import docker_container.nginx container_id
+```
+
+### Remote State (Team Collaboration)
 
 ```hcl
-# Docker container resource
-resource "docker_container" "nginx" {
-  name  = "my-nginx"
+# backend.tf
+terraform {
+  backend "s3" {
+    bucket         = "my-terraform-state"
+    key            = "prod/infrastructure.tfstate"
+    region         = "us-east-1"
+    encrypt        = true
+    dynamodb_table = "terraform-locks"  # Prevents concurrent modifications
+  }
+}
+```
+
+---
+
+## Resource Dependencies
+
+### Implicit Dependencies
+
+Terraform automatically detects dependencies:
+
+```hcl
+resource "docker_network" "app" {
+  name = "app-network"
+}
+
+resource "docker_container" "web" {
+  name  = "web"
   image = docker_image.nginx.image_id
-  
-  ports {
-    internal = 80
-    external = 8080
+
+  networks_advanced {
+    name = docker_network.app.name  # Implicit dependency
   }
 }
-
-# Docker image resource
-resource "docker_image" "nginx" {
-  name = "nginx:latest"
-}
 ```
 
-**Resource Syntax**:
+### Explicit Dependencies
+
+Use `depends_on` when Terraform can't detect:
+
 ```hcl
-resource "<PROVIDER>_<TYPE>" "<NAME>" {
-  # Configuration arguments
-  argument1 = "value"
-  argument2 = "value"
+resource "docker_container" "app" {
+  name  = "app"
+  image = docker_image.app.image_id
+
+  depends_on = [
+    docker_container.db  # Wait for DB to start
+  ]
 }
 ```
 
-### 3. State
+### Dependency Graph
 
-Terraform maintains a **state file** (`terraform.tfstate`) that maps your configuration to real-world resources. This is how Terraform knows what exists and what to change.
-
-```
-┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
-│   main.tf       │ ──► │ terraform.tfstate│ ◄── │ Real Resources  │
-│   (Desired)     │     │ (Current Known) │     │ (Actual)        │
-└─────────────────┘     └─────────────────┘     └─────────────────┘
+```bash
+# Visualize dependencies
+terraform graph | dot -Tpng > graph.png
 ```
 
-> ⚠️ **Never manually edit the state file!**
+```
+┌────────────────────────────────────────────────┐
+│              docker_network.app                 │
+└─────────────────────┬──────────────────────────┘
+                      │
+        ┌─────────────┴─────────────┐
+        ▼                           ▼
+┌───────────────────┐    ┌───────────────────┐
+│docker_container.db│    │docker_container.web│
+└───────────────────┘    └───────────────────┘
+        │
+        ▼
+┌───────────────────┐
+│docker_container.app│
+└───────────────────┘
+```
 
-### 4. Variables
+---
 
-Variables make configurations reusable.
+## Variables and Outputs
 
-**Input Variables** (`variables.tf`):
+### Input Variable Types
+
 ```hcl
-variable "container_name" {
-  description = "Name of the Docker container"
-  type        = string
-  default     = "my-app"
-}
-
-variable "external_port" {
-  description = "External port to expose"
+# Basic types
+variable "instance_count" {
+  description = "Number of instances"
   type        = number
-  default     = 8080
+  default     = 2
 }
 
 variable "environment" {
   description = "Environment name"
   type        = string
+  
   validation {
     condition     = contains(["dev", "staging", "prod"], var.environment)
-    error_message = "Environment must be dev, staging, or prod."
+    error_message = "Must be dev, staging, or prod."
   }
 }
-```
 
-**Use Variables**:
-```hcl
-resource "docker_container" "app" {
-  name  = var.container_name
-  
-  ports {
-    external = var.external_port
+# Complex types
+variable "ports" {
+  description = "Port mappings"
+  type        = list(number)
+  default     = [80, 443]
+}
+
+variable "tags" {
+  description = "Resource tags"
+  type        = map(string)
+  default     = {
+    Project = "MyApp"
+    Team    = "DevOps"
   }
 }
+
+variable "container_config" {
+  description = "Container configuration"
+  type = object({
+    name   = string
+    image  = string
+    ports  = list(number)
+    memory = optional(number, 512)
+  })
+}
+
+# Sensitive variable
+variable "db_password" {
+  description = "Database password"
+  type        = string
+  sensitive   = true
+}
 ```
 
-**Setting Variables**:
-```bash
-# terraform.tfvars file
-container_name = "production-app"
-external_port  = 80
+### Variable Precedence (lowest to highest)
 
-# Command line
-terraform apply -var="container_name=my-app"
+1. Default values in variable definition
+2. `terraform.tfvars` file
+3. `*.auto.tfvars` files
+4. `-var-file` flag
+5. `-var` flag
+6. `TF_VAR_*` environment variables
 
-# Environment variables
-export TF_VAR_container_name="my-app"
-```
-
-### 5. Outputs
-
-**Outputs** extract information after resources are created.
+### Outputs
 
 ```hcl
-output "container_id" {
-  description = "ID of the created container"
-  value       = docker_container.app.id
+output "container_ip" {
+  description = "Container IP address"
+  value       = docker_container.web.network_data[0].ip_address
 }
 
-output "access_url" {
-  description = "URL to access the application"
-  value       = "http://localhost:${var.external_port}"
+output "db_connection_string" {
+  description = "Database connection string"
+  value       = "postgres://${var.db_user}:${var.db_password}@${docker_container.db.name}:5432/${var.db_name}"
+  sensitive   = true
+}
+
+# Use output from another module
+output "api_url" {
+  value = module.api.endpoint_url
 }
 ```
 
-### 6. Data Sources
+---
 
-**Data sources** fetch information about existing infrastructure.
+## Modules
 
+### Module Structure
+
+```
+modules/
+└── web_app/
+    ├── main.tf       # Resources
+    ├── variables.tf  # Input variables
+    ├── outputs.tf    # Outputs
+    └── README.md     # Documentation
+```
+
+### Creating a Module
+
+**modules/web_app/main.tf:**
 ```hcl
-# Get info about an existing Docker network
-data "docker_network" "bridge" {
-  name = "bridge"
+resource "docker_network" "app" {
+  name = "${var.app_name}-network"
 }
 
-# Use it in a resource
+resource "docker_image" "app" {
+  name = var.image
+}
+
 resource "docker_container" "app" {
-  name  = "my-app"
+  count = var.replicas
+  name  = "${var.app_name}-${count.index}"
   image = docker_image.app.image_id
-  
+
   networks_advanced {
-    name = data.docker_network.bridge.name
+    name = docker_network.app.name
   }
+
+  ports {
+    internal = var.container_port
+    external = var.host_port + count.index
+  }
+
+  env = [
+    for k, v in var.environment : "${k}=${v}"
+  ]
 }
 ```
 
----
-
-## Terraform Workflow
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                      TERRAFORM WORKFLOW                          │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                  │
-│   1. WRITE          2. INIT           3. PLAN          4. APPLY │
-│   ┌─────────┐       ┌─────────┐       ┌─────────┐     ┌────────┐│
-│   │ .tf     │ ───►  │ Download│ ───►  │ Preview │ ──► │ Create ││
-│   │ files   │       │Providers│       │ Changes │     │ Infra  ││
-│   └─────────┘       └─────────┘       └─────────┘     └────────┘│
-│                                                                  │
-│                                        5. DESTROY                │
-│                                        ┌─────────┐               │
-│                                        │ Remove  │               │
-│                                        │ Infra   │               │
-│                                        └─────────┘               │
-└─────────────────────────────────────────────────────────────────┘
-```
-
-```bash
-# Initialize - downloads providers
-terraform init
-
-# Format code
-terraform fmt
-
-# Validate configuration
-terraform validate
-
-# Preview changes
-terraform plan
-
-# Apply changes
-terraform apply
-
-# Destroy infrastructure
-terraform destroy
-```
-
----
-
-## Hands-On Lab
-
-### Exercise 1: Provision Nginx with Docker (15 mins)
-
-Create a project directory:
-```bash
-mkdir -p ~/terraform-lab && cd ~/terraform-lab
-```
-
-Create `main.tf`:
+**modules/web_app/variables.tf:**
 ```hcl
-terraform {
-  required_providers {
-    docker = {
-      source  = "kreuzwerker/docker"
-      version = "~> 3.0.1"
-    }
+variable "app_name" {
+  type = string
+}
+
+variable "image" {
+  type = string
+}
+
+variable "replicas" {
+  type    = number
+  default = 1
+}
+
+variable "container_port" {
+  type    = number
+  default = 80
+}
+
+variable "host_port" {
+  type    = number
+  default = 8080
+}
+
+variable "environment" {
+  type    = map(string)
+  default = {}
+}
+```
+
+**modules/web_app/outputs.tf:**
+```hcl
+output "container_names" {
+  value = docker_container.app[*].name
+}
+
+output "network_name" {
+  value = docker_network.app.name
+}
+```
+
+### Using Modules
+
+```hcl
+module "frontend" {
+  source = "./modules/web_app"
+
+  app_name       = "frontend"
+  image          = "nginx:alpine"
+  replicas       = 2
+  container_port = 80
+  host_port      = 8080
+}
+
+module "backend" {
+  source = "./modules/web_app"
+
+  app_name       = "backend"
+  image          = "python:3.11"
+  replicas       = 3
+  container_port = 5000
+  host_port      = 5000
+
+  environment = {
+    DB_HOST = docker_container.postgres.name
+    DB_PORT = "5432"
   }
 }
 
-provider "docker" {
-  host = "unix:///var/run/docker.sock"
+# Reference module outputs
+output "frontend_containers" {
+  value = module.frontend.container_names
+}
+```
+
+---
+
+## Advanced Patterns
+
+### For_each vs Count
+
+```hcl
+# Count - use for identical resources
+resource "docker_container" "worker" {
+  count = 3
+  name  = "worker-${count.index}"
+  image = docker_image.worker.image_id
 }
 
-resource "docker_image" "nginx" {
-  name         = "nginx:alpine"
-  keep_locally = false
+# For_each - use for distinct resources
+variable "environments" {
+  default = {
+    dev     = { port = 8080, replicas = 1 }
+    staging = { port = 8081, replicas = 2 }
+    prod    = { port = 80, replicas = 5 }
+  }
 }
 
-resource "docker_container" "nginx" {
-  image = docker_image.nginx.image_id
-  name  = "learning-terraform"
+resource "docker_container" "app" {
+  for_each = var.environments
+
+  name  = "app-${each.key}"
+  image = docker_image.app.image_id
 
   ports {
     internal = 80
-    external = 8080
+    external = each.value.port
   }
 }
 
-output "container_name" {
-  value = docker_container.nginx.name
+# Access: docker_container.app["prod"].id
+```
+
+### Dynamic Blocks
+
+```hcl
+variable "ingress_rules" {
+  default = [
+    { port = 80, cidr = "0.0.0.0/0" },
+    { port = 443, cidr = "0.0.0.0/0" },
+    { port = 22, cidr = "10.0.0.0/8" }
+  ]
 }
 
-output "url" {
-  value = "http://localhost:8080"
+resource "aws_security_group" "web" {
+  name = "web-sg"
+
+  dynamic "ingress" {
+    for_each = var.ingress_rules
+    content {
+      from_port   = ingress.value.port
+      to_port     = ingress.value.port
+      protocol    = "tcp"
+      cidr_blocks = [ingress.value.cidr]
+    }
+  }
 }
 ```
 
-Run it:
-```bash
-terraform init
-terraform plan
-terraform apply -auto-approve
+### Conditional Resources
 
-# Test it
-curl localhost:8080
+```hcl
+variable "create_monitoring" {
+  type    = bool
+  default = true
+}
 
-# View state
-terraform show
+resource "docker_container" "prometheus" {
+  count = var.create_monitoring ? 1 : 0
 
-# Destroy when done
-terraform destroy -auto-approve
+  name  = "prometheus"
+  image = docker_image.prometheus.image_id
+}
+
+# Reference conditionally created resource
+output "prometheus_id" {
+  value = var.create_monitoring ? docker_container.prometheus[0].id : null
+}
 ```
 
-### Exercise 2: Multi-Container Application (25 mins)
+---
 
-Create a full stack with Redis and a Python app.
+## Terraform with Docker Example
 
-Create `main.tf`:
+### Complete Application Stack
+
 ```hcl
 terraform {
   required_providers {
     docker = {
       source  = "kreuzwerker/docker"
-      version = "~> 3.0.1"
+      version = "~> 3.0"
     }
   }
 }
 
 provider "docker" {}
 
-# Create a custom network
-resource "docker_network" "app_network" {
-  name = "app-network"
+# Variables
+variable "app_name" {
+  default = "myapp"
 }
 
-# Redis container
+variable "environment" {
+  default = "dev"
+}
+
+locals {
+  common_tags = {
+    App         = var.app_name
+    Environment = var.environment
+    ManagedBy   = "Terraform"
+  }
+}
+
+# Network
+resource "docker_network" "app" {
+  name   = "${var.app_name}-${var.environment}"
+  driver = "bridge"
+}
+
+# Database
+resource "docker_volume" "postgres_data" {
+  name = "${var.app_name}-postgres-data"
+}
+
+resource "docker_image" "postgres" {
+  name = "postgres:15-alpine"
+}
+
+resource "docker_container" "postgres" {
+  name  = "${var.app_name}-db"
+  image = docker_image.postgres.image_id
+
+  networks_advanced {
+    name = docker_network.app.name
+  }
+
+  volumes {
+    volume_name    = docker_volume.postgres_data.name
+    container_path = "/var/lib/postgresql/data"
+  }
+
+  env = [
+    "POSTGRES_USER=myapp",
+    "POSTGRES_PASSWORD=secretpassword",
+    "POSTGRES_DB=myapp"
+  ]
+
+  healthcheck {
+    test     = ["CMD-SHELL", "pg_isready -U myapp"]
+    interval = "10s"
+    timeout  = "5s"
+    retries  = 5
+  }
+
+  restart = "unless-stopped"
+}
+
+# Redis
 resource "docker_image" "redis" {
   name = "redis:alpine"
 }
 
 resource "docker_container" "redis" {
-  name  = "redis-cache"
+  name  = "${var.app_name}-redis"
   image = docker_image.redis.image_id
-  
+
   networks_advanced {
-    name = docker_network.app_network.name
+    name = docker_network.app.name
   }
+
+  command = ["redis-server", "--appendonly", "yes"]
+
+  restart = "unless-stopped"
 }
 
-# Web application container
-resource "docker_image" "web" {
-  name = "hashicorp/http-echo:latest"
+# Application
+resource "docker_image" "app" {
+  name = "python:3.11-slim"
 }
 
-resource "docker_container" "web" {
-  name  = "web-app"
-  image = docker_image.web.image_id
-  
-  command = ["-text=Hello from Terraform!"]
-  
+resource "docker_container" "app" {
+  count = 2  # Run 2 replicas
+  name  = "${var.app_name}-web-${count.index}"
+  image = docker_image.app.image_id
+
+  networks_advanced {
+    name = docker_network.app.name
+  }
+
   ports {
-    internal = 5678
-    external = var.web_port
+    internal = 5000
+    external = 5000 + count.index
   }
-  
-  networks_advanced {
-    name = docker_network.app_network.name
-  }
-  
-  depends_on = [docker_container.redis]
+
+  env = [
+    "DATABASE_URL=postgres://myapp:secretpassword@${docker_container.postgres.name}:5432/myapp",
+    "REDIS_URL=redis://${docker_container.redis.name}:6379/0"
+  ]
+
+  depends_on = [
+    docker_container.postgres,
+    docker_container.redis
+  ]
+
+  restart = "unless-stopped"
 }
 
-variable "web_port" {
-  description = "Port for the web application"
-  type        = number
-  default     = 9000
+# Outputs
+output "app_urls" {
+  value = [
+    for container in docker_container.app :
+    "http://localhost:${container.ports[0].external}"
+  ]
 }
 
-output "web_url" {
-  value = "http://localhost:${var.web_port}"
+output "database_host" {
+  value = docker_container.postgres.name
 }
 ```
-
-Apply and test:
-```bash
-terraform init
-terraform apply -auto-approve
-
-curl localhost:9000
-
-# List containers
-docker ps
-
-terraform destroy -auto-approve
-```
-
-### Exercise 3: Kubernetes Resources (30 mins)
-
-Deploy to OrbStack's Kubernetes cluster.
-
-Create `kubernetes.tf`:
-```hcl
-terraform {
-  required_providers {
-    kubernetes = {
-      source  = "hashicorp/kubernetes"
-      version = "~> 2.23"
-    }
-  }
-}
-
-provider "kubernetes" {
-  config_path = "~/.kube/config"
-}
-
-resource "kubernetes_namespace" "demo" {
-  metadata {
-    name = "terraform-demo"
-  }
-}
-
-resource "kubernetes_deployment" "nginx" {
-  metadata {
-    name      = "nginx-deployment"
-    namespace = kubernetes_namespace.demo.metadata[0].name
-  }
-
-  spec {
-    replicas = 3
-
-    selector {
-      match_labels = {
-        app = "nginx"
-      }
-    }
-
-    template {
-      metadata {
-        labels = {
-          app = "nginx"
-        }
-      }
-
-      spec {
-        container {
-          image = "nginx:alpine"
-          name  = "nginx"
-
-          port {
-            container_port = 80
-          }
-        }
-      }
-    }
-  }
-}
-
-resource "kubernetes_service" "nginx" {
-  metadata {
-    name      = "nginx-service"
-    namespace = kubernetes_namespace.demo.metadata[0].name
-  }
-
-  spec {
-    selector = {
-      app = "nginx"
-    }
-
-    port {
-      port        = 80
-      target_port = 80
-    }
-
-    type = "NodePort"
-  }
-}
-
-output "service_port" {
-  value = kubernetes_service.nginx.spec[0].port[0].node_port
-}
-```
-
-Apply:
-```bash
-# Ensure Kubernetes is enabled in OrbStack
-terraform init
-terraform apply -auto-approve
-
-# Check resources
-kubectl get all -n terraform-demo
-
-# Cleanup
-terraform destroy -auto-approve
-```
-
----
-
-## Best Practices
-
-### File Structure
-
-```
-my-infrastructure/
-├── main.tf           # Main configuration
-├── variables.tf      # Input variables
-├── outputs.tf        # Output values
-├── providers.tf      # Provider configuration
-├── terraform.tfvars  # Variable values (don't commit secrets!)
-└── modules/          # Reusable modules
-    └── web-server/
-        ├── main.tf
-        ├── variables.tf
-        └── outputs.tf
-```
-
-### State Management
-
-```hcl
-# Use remote backend for team collaboration
-terraform {
-  backend "s3" {
-    bucket = "my-terraform-state"
-    key    = "prod/terraform.tfstate"
-    region = "us-east-1"
-  }
-}
-```
-
-### Security
-
-1. **Never commit `.tfstate`** - contains sensitive data
-2. **Use variables for secrets**
-3. **Use `.gitignore`**:
-```gitignore
-*.tfstate
-*.tfstate.*
-*.tfvars
-.terraform/
-```
-
----
-
-## Further Learning
-
-1. **HashiCorp Learn**: [learn.hashicorp.com/terraform](https://learn.hashicorp.com/terraform)
-2. **Terraform Registry**: [registry.terraform.io](https://registry.terraform.io/)
-3. **Certification**: HashiCorp Certified Terraform Associate

@@ -1,0 +1,112 @@
+pipeline {
+    agent any
+
+    options {
+        buildDiscarder(logRotator(numToKeepStr: '10'))
+        timestamps()
+        timeout(time: 30, unit: 'MINUTES')
+    }
+
+    environment {
+        APP_NAME = 'localops-webapp'
+        DOCKER_REGISTRY = 'localhost:5000'
+        IMAGE_TAG = "${env.BUILD_NUMBER}"
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                checkout scm
+                script {
+                    env.GIT_COMMIT_SHORT = sh(script: 'git rev-parse --short HEAD', returnStdout: true).trim()
+                }
+            }
+        }
+
+        stage('Build & Test') {
+            agent {
+                docker {
+                    image 'python:3.11-slim'
+                    args '-u root'
+                }
+            }
+            steps {
+                dir('playground/examples/webapp') {
+                    sh '''
+                        pip install -r requirements.txt
+                        pip install pytest
+                        python -c "from app import app; print('Import OK')"
+                    '''
+                }
+            }
+        }
+
+        stage('Build Docker Image') {
+            steps {
+                dir('playground/examples/webapp') {
+                    sh "docker build -t ${APP_NAME}:${IMAGE_TAG} ."
+                    sh "docker tag ${APP_NAME}:${IMAGE_TAG} ${APP_NAME}:latest"
+                }
+            }
+        }
+
+        stage('Security Scan') {
+            steps {
+                sh "docker scout cves ${APP_NAME}:${IMAGE_TAG} || true"
+            }
+        }
+
+        stage('Deploy with Terraform') {
+            steps {
+                dir('playground/terraform') {
+                    sh 'terraform init'
+                    sh 'terraform apply -auto-approve'
+                }
+            }
+        }
+
+        stage('Configure with Ansible') {
+            steps {
+                dir('playground/ansible') {
+                    sh 'ansible-playbook -i inventory.ini setup.yml'
+                }
+            }
+        }
+
+        stage('Verify Deployment') {
+            steps {
+                script {
+                    def maxRetries = 10
+                    def retryCount = 0
+                    def success = false
+                    
+                    while (!success && retryCount < maxRetries) {
+                        try {
+                            sh 'curl -f http://localhost:8000/health'
+                            success = true
+                        } catch (Exception e) {
+                            retryCount++
+                            sleep(5)
+                        }
+                    }
+                    
+                    if (!success) {
+                        error('Health check failed')
+                    }
+                }
+            }
+        }
+    }
+
+    post {
+        success {
+            echo '✅ Deployment successful!'
+        }
+        failure {
+            echo '❌ Deployment failed!'
+        }
+        always {
+            cleanWs()
+        }
+    }
+}
