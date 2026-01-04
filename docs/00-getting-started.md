@@ -1,121 +1,125 @@
-# Getting Started with LocalOps
+# The Complete DevOps & Platform Engineering Roadmap
 
-## Welcome to LocalOps
+Welcome to **LocalOps**. This documentation is designed to take you from a **complete beginner** to an **Advanced Platform Engineer**.
 
-**LocalOps** is a comprehensive DevOps learning playground designed to help you master modern infrastructure and deployment practices through hands-on examples.
+The roadmap is divided into **8 Phases**. It is recommended to follow them in order, as each phase builds upon the previous one.
 
-## Quick Start
+---
 
-### Prerequisites
+## 🔰 Phase 1: The Foundation
+*Before touching the cloud, you must understand the machine and how computers talk.*
 
-- Docker and Docker Compose
-- Git
-- A terminal/shell
-- Basic command line knowledge
+| Topic | Description | Theory | Practice |
+|-------|-------------|--------|----------|
+| **Linux** | Shell, Permissions, Processes. The OS of the cloud. | [03-linux.md](03-linux.md) | `playground/linux/` |
+| **Networking** | DNS, TCP/IP, OSI, VPCs. How data moves. | [27-networking.md](27-networking.md) | Use `dig`, `curl`, `netstat` |
+| **Automation** | Python & Go for DevOps. Moving beyond Bash. | [29-automation.md](29-automation.md) | Write a health-check script |
 
-### Clone the Repository
+---
 
-```bash
-git clone https://github.com/your-org/localops.git
-cd localops
-```
+## 📦 Phase 2: Containerization
+*Stop saying "It works on my machine". Package your apps securely.*
 
-### Explore the Structure
+| Topic | Description | Theory | Practice |
+|-------|-------------|--------|----------|
+| **Docker** | Images, Containers, Multi-stage builds. | [04-docker.md](04-docker.md) | `playground/examples` |
+| **Databases** | Managing state in containers (SQL/NoSQL). | [13-databases.md](13-databases.md) | Run Postgres in Docker |
 
-```
-localops/
-├── docs/                 # Documentation (you are here)
-├── playground/
-│   └── examples/        # Hands-on projects
-├── scripts/             # Helper scripts
-└── README.md
-```
+---
 
-## Learning Path
+## 🏗️ Phase 3: Infrastructure as Code (IaC)
+*Stop clicking buttons in the console. Define your world in text.*
 
-### Beginner Path
+| Topic | Description | Theory | Practice |
+|-------|-------------|--------|----------|
+| **Terraform** | Provisioning Infrastructure (The Standard). | [02-terraform.md](02-terraform.md) | `playground/examples/*/terraform` |
+| **Ansible** | Configuration Management (Configuring VMs). | [05-ansible.md](05-ansible.md) | `playground/ansible/` |
+| **Patterns** | Advanced Terraform modules & state usage. | [25-terraform-patterns.md](25-terraform-patterns.md) | Refactor into Modules |
 
-| Order | Topic | Documentation |
-|-------|-------|---------------|
-| 1 | Linux Basics | [03-linux.md](03-linux.md) |
-| 2 | Docker Fundamentals | [04-docker.md](04-docker.md) |
-| 3 | Git and CI/CD | [03-cicd.md](03-cicd.md) |
-| 4 | Basic Monitoring | [09-monitoring.md](09-monitoring.md) |
+---
 
-### Intermediate Path
+## 🚀 Phase 4: CI/CD (Continuous Integration/Delivery)
+*Automate the testing and delivery of your software.*
 
-| Order | Topic | Documentation |
-|-------|-------|---------------|
-| 1 | Kubernetes | [06-kubernetes.md](06-kubernetes.md) |
-| 2 | Infrastructure as Code | [02-terraform.md](02-terraform.md) |
-| 3 | Configuration Management | [05-ansible.md](05-ansible.md) |
-| 4 | GitOps | [10-gitops.md](10-gitops.md) |
+| Topic | Description | Theory | Practice |
+|-------|-------------|--------|----------|
+| **The Theory** | CI vs CD, Deployment Strategies (Blue/Green). | [03-cicd.md](03-cicd.md) | Draw a pipeline board |
+| **Jenkins** | The classic, extendable CI server. | [07-jenkins.md](07-jenkins.md) | Set up a master/agent |
+| **GitHub Actions**| The modern, integrated choice. | [16-github-actions.md](16-github-actions.md) | `.github/workflows/` |
+| **GitLab CI** | Integrated DevOps Platform. | [17-gitlab-ci.md](17-gitlab-ci.md) | `.gitlab-ci.yml` |
+| **CircleCI** | Cloud-native speed focus. | [18-circleci.md](18-circleci.md) | `.circleci/config.yml` |
 
-### Advanced Path
+---
 
-| Order | Topic | Documentation |
-|-------|-------|---------------|
-| 1 | Security Best Practices | [14-security.md](14-security.md) |
-| 2 | Secrets Management | [11-vault.md](11-vault.md) |
-| 3 | Cloud Patterns | [23-cloud-patterns.md](23-cloud-patterns.md) |
+## ☸️ Phase 5: Container Orchestration & GitOps
+*Manage thousands of containers across clusters.*
 
-## Running Examples
+| Topic | Description | Theory | Practice |
+|-------|-------------|--------|----------|
+| **Kubernetes** | Architecture, Pods, Services, Ingress. | [06-kubernetes.md](06-kubernetes.md) | `playground/examples/*/k8s` |
+| **GitOps** | Infrastructure changes via Git PRs. | [10-gitops.md](10-gitops.md) | Install ArgoCD |
+| **ArgoCD** | Declarative Continuous Delivery. | [19-argocd.md](19-argocd.md) | Sync an App |
+| **Argo Workflows**| Orchestrating jobs/pipelines on K8s. | [20-argo-workflows.md](20-argo-workflows.md) | Run a DAG workflow |
 
-Most examples can be started with Docker Compose:
+---
 
-```bash
-cd playground/examples/<example-name>
-docker-compose up -d
-```
+## 🔭 Phase 6: Observability (SRE Level 1)
+*You can't fix what you can't see.*
 
-Check the README in each example for specific instructions.
+| Topic | Description | Theory | Practice |
+|-------|-------------|--------|----------|
+| **Monitoring** | The 3 Pillars (Metrics, Logs, Traces). | [09-monitoring.md](09-monitoring.md) | Setup ELK Stack |
+| **Prometheus** | Storing time-series metrics. PromQL. | [26-prometheus-grafana.md](26-prometheus-grafana.md) | Scrape an endpoint |
+| **Grafana** | Visualizing your data. | [26-prometheus-grafana.md](26-prometheus-grafana.md) | Build a Dashboard |
+| **Troubleshooting**| Structured approach to debugging. | [15-troubleshooting.md](15-troubleshooting.md) | Break & Fix a Pod |
 
-## Documentation Overview
+---
 
-### Core Technologies
+## 🔒 Phase 7: Security & Governance (DevSecOps)
+*Security is everyone's job, not just the "Security Team".*
 
-| Document | Description |
-|----------|-------------|
-| [Docker](04-docker.md) | Containerization fundamentals |
-| [Kubernetes](06-kubernetes.md) | Container orchestration |
-| [Terraform](02-terraform.md) | Infrastructure as Code |
-| [Ansible](05-ansible.md) | Configuration management |
+| Topic | Description | Theory | Practice |
+|-------|-------------|--------|----------|
+| **Security 101** | DevSecOps, Shield-Right, Shift-Left. | [14-security.md](14-security.md) | Scan an image (Trivy) |
+| **Vault** | Secrets Management (No passwords in git!). | [11-vault.md](11-vault.md) | Inject secrets to K8s |
+| **Best Practices**| Hardening guide for Prods. | [24-security-best-practices.md](24-security-best-practices.md) | Audit an AWS account |
 
-### CI/CD Platforms
+---
 
-| Document | Description |
-|----------|-------------|
-| [CI/CD Concepts](03-cicd.md) | Core principles |
-| [Jenkins](07-jenkins.md) | Jenkins pipelines |
-| [GitHub Actions](16-github-actions.md) | GitHub workflows |
-| [GitLab CI](17-gitlab-ci.md) | GitLab pipelines |
-| [CircleCI](18-circleci.md) | CircleCI configuration |
+## 👑 Phase 8: Advanced Platform Engineering
+*Building the platforms that developers build on.*
 
-### Operations
+| Topic | Description | Theory | Practice |
+|-------|-------------|--------|----------|
+| **SRE** | SLOs, Error Budgets, Incident Mgmt. | [23-sre.md](23-sre.md) | Define an SLO |
+| **Platform Eng** | IDPs, Golden Paths, Backstage. | [22-platform-engineering.md](22-platform-engineering.md) | Draw a Team Topology |
+| **Service Mesh** | Istio/Linkerd, mTLS, Traffic Control. | [25-service-mesh.md](25-service-mesh.md) | Install Istio |
+| **Cloud Patterns**| Microservices, CQRS, Saga. | [23-cloud-patterns.md](23-cloud-patterns.md) | Architect a System |
+| **Serverless** | Event-Driven Architectures (Lambda/Kafka).| [28-serverless.md](28-serverless.md) | Design an EDA |
+| **FinOps** | Cost Management & Optimization. | [30-finops.md](30-finops.md) | Estimate Project Cost |
 
-| Document | Description |
-|----------|-------------|
-| [Monitoring](09-monitoring.md) | Observability and alerting |
-| [GitOps](10-gitops.md) | Git-based operations |
-| [Vault](11-vault.md) | Secrets management |
-| [Databases](13-databases.md) | Database operations |
+---
 
-### Reference
+## 🎓 Phase 9: The Masterclass (Staff Engineer Level)
+*Understanding how the magic actually works (Kernel, Protocols, Consensus).*
 
-| Document | Description |
-|----------|-------------|
-| [Security](14-security.md) | Security best practices |
-| [Troubleshooting](15-troubleshooting.md) | Debugging guide |
-| [Linux](03-linux.md) | Linux fundamentals |
+| Topic | Description | Theory | Practice |
+|-------|-------------|--------|----------|
+| **K8s Internals** | CNI, CSI, CRI, etcd, Operator Pattern. | [31-kubernetes-internals.md](31-kubernetes-internals.md) | Use `crictl` |
+| **Linux Internals** | Namespaces, Cgroups, Syscalls, eBPF. | [32-linux-internals.md](32-linux-internals.md) | Use `strace` |
+| **Distributed Sys** | CAP Theorem, Raft, Consistency Models. | [33-distributed-systems.md](33-distributed-systems.md) | Design an HA system |
 
-## Getting Help
+---
 
-1. Check the [Troubleshooting Guide](15-troubleshooting.md)
-2. Review example README files
-3. Search documentation for specific topics
+## 🎮 Hands-on Projects
+*Theory is nothing without practice. Check the `playground/examples` folder.*
 
-## Next Steps
+1.  **Static Website**: Docker + Nginx.
+2.  **3-Tier App**: React + Node + Postgres (Docker Compose).
+3.  **K8s Deployment**: Deploy the 3-Tier App to Minikube.
+4.  **CI/CD Pipeline**: Build & Push image on commit.
+5.  **GitOps Sync**: Deploy via ArgoCD.
+6.  **Monitoring**: Add Prometheus metrics to the Node App.
 
-Start with Docker basics in [04-docker.md](04-docker.md) if you're new to containers, or jump to [06-kubernetes.md](06-kubernetes.md) if you're ready for orchestration.
-
-Happy learning! 🚀
+---
+*Happy Learning!*
