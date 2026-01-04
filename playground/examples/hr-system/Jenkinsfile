@@ -1,0 +1,98 @@
+pipeline {
+    agent any
+    
+    environment {
+        DOCKER_REGISTRY = 'registry.example.com'
+        IMAGE_NAME = 'hr-system/api'
+        KUBE_CONFIG = credentials('kubeconfig')
+    }
+    
+    stages {
+        stage('Checkout') {
+            steps {
+                checkout scm
+            }
+        }
+        
+        stage('Test') {
+            agent {
+                docker {
+                    image 'node:18-alpine'
+                }
+            }
+            steps {
+                dir('api') {
+                    sh 'npm ci'
+                    sh 'npm run lint --if-present'
+                    sh 'npm test --if-present'
+                }
+            }
+        }
+        
+        stage('Build Docker Image') {
+            steps {
+                script {
+                    def image = docker.build("${DOCKER_REGISTRY}/${IMAGE_NAME}:${BUILD_NUMBER}", './api')
+                    docker.withRegistry("https://${DOCKER_REGISTRY}", 'docker-credentials') {
+                        image.push()
+                        image.push('latest')
+                    }
+                }
+            }
+        }
+        
+        stage('Security Scan') {
+            steps {
+                sh "trivy image ${DOCKER_REGISTRY}/${IMAGE_NAME}:${BUILD_NUMBER}"
+            }
+        }
+        
+        stage('Deploy to Staging') {
+            when {
+                branch 'develop'
+            }
+            steps {
+                withKubeConfig([credentialsId: 'kubeconfig']) {
+                    sh """
+                        kubectl set image deployment/hr-api \
+                            api=${DOCKER_REGISTRY}/${IMAGE_NAME}:${BUILD_NUMBER} \
+                            -n hr-staging
+                        kubectl rollout status deployment/hr-api -n hr-staging
+                    """
+                }
+            }
+        }
+        
+        stage('Deploy to Production') {
+            when {
+                branch 'main'
+            }
+            input {
+                message "Deploy to production?"
+                ok "Yes, deploy"
+            }
+            steps {
+                withKubeConfig([credentialsId: 'kubeconfig']) {
+                    sh """
+                        kubectl set image deployment/hr-api \
+                            api=${DOCKER_REGISTRY}/${IMAGE_NAME}:${BUILD_NUMBER} \
+                            -n hr-production
+                        kubectl rollout status deployment/hr-api -n hr-production
+                    """
+                }
+            }
+        }
+    }
+    
+    post {
+        always {
+            cleanWs()
+        }
+        success {
+            slackSend channel: '#deployments', color: 'good', message: "HR System deployed: ${BUILD_URL}"
+        }
+        failure {
+            slackSend channel: '#deployments', color: 'danger', message: "HR System failed: ${BUILD_URL}"
+        }
+    }
+}

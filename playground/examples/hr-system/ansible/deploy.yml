@@ -1,0 +1,85 @@
+---
+- name: Deploy HR System
+  hosts: app_servers
+  become: yes
+  vars:
+    app_name: hr-system
+    app_dir: /opt/hr-system
+    docker_image: "{{ lookup('env', 'IMAGE_TAG') | default('hr-api:latest') }}"
+    postgres_password: "{{ lookup('env', 'POSTGRES_PASSWORD') }}"
+    
+  tasks:
+    - name: Ensure app directory exists
+      file:
+        path: "{{ app_dir }}"
+        state: directory
+        mode: '0755'
+
+    - name: Copy docker-compose file
+      template:
+        src: templates/docker-compose.yml.j2
+        dest: "{{ app_dir }}/docker-compose.yml"
+        mode: '0644'
+
+    - name: Copy environment file
+      template:
+        src: templates/env.j2
+        dest: "{{ app_dir }}/.env"
+        mode: '0600'
+
+    - name: Pull latest images
+      docker_image:
+        name: "{{ docker_image }}"
+        source: pull
+        force_source: yes
+
+    - name: Start services
+      docker_compose:
+        project_src: "{{ app_dir }}"
+        state: present
+        pull: yes
+      register: output
+
+    - name: Wait for API to be healthy
+      uri:
+        url: "http://localhost:8000/health"
+        status_code: 200
+      register: result
+      until: result.status == 200
+      retries: 30
+      delay: 5
+
+    - name: Run database migrations
+      docker_container:
+        name: hr-migrations
+        image: "{{ docker_image }}"
+        command: npm run migrate
+        network_mode: host
+        env:
+          DATABASE_URL: "postgres://hr:{{ postgres_password }}@localhost:5432/hr"
+        state: started
+        auto_remove: yes
+
+- name: Configure Nginx Reverse Proxy
+  hosts: nginx_servers
+  become: yes
+  
+  tasks:
+    - name: Copy nginx config
+      template:
+        src: templates/nginx-hr.conf.j2
+        dest: /etc/nginx/sites-available/hr-system.conf
+      notify: Reload Nginx
+
+    - name: Enable site
+      file:
+        src: /etc/nginx/sites-available/hr-system.conf
+        dest: /etc/nginx/sites-enabled/hr-system.conf
+        state: link
+      notify: Reload Nginx
+
+  handlers:
+    - name: Reload Nginx
+      service:
+        name: nginx
+        state: reloaded
