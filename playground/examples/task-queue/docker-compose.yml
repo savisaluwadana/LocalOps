@@ -1,0 +1,74 @@
+version: '3.8'
+
+services:
+  api:
+    build: ./api
+    ports:
+      - "8000:8000"
+    environment:
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      - redis
+    networks:
+      - taskqueue
+
+  worker-email:
+    build: ./worker
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - QUEUE_NAME=email
+      - CONCURRENCY=5
+    depends_on:
+      - redis
+    networks:
+      - taskqueue
+
+  worker-image:
+    build: ./worker
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - QUEUE_NAME=image-resize
+      - CONCURRENCY=2
+    depends_on:
+      - redis
+    networks:
+      - taskqueue
+
+  worker-export:
+    build: ./worker
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - QUEUE_NAME=export
+      - CONCURRENCY=1
+    depends_on:
+      - redis
+    networks:
+      - taskqueue
+
+  dashboard:
+    image: felixmosh/bull-board:latest
+    ports:
+      - "3000:3000"
+    environment:
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - QUEUE_NAMES=email,image-resize,export
+    depends_on:
+      - redis
+    networks:
+      - taskqueue
+
+  redis:
+    image: redis:alpine
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    networks:
+      - taskqueue
+
+networks:
+  taskqueue:
+    driver: bridge
+
+volumes:
+  redis_data:

@@ -1,0 +1,72 @@
+version: '3.8'
+
+services:
+  api:
+    build: ./api
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgres://notify:password@postgres:5432/notify
+      - REDIS_URL=redis://redis:6379
+      - SENDGRID_API_KEY=${SENDGRID_API_KEY:-fake}
+      - TWILIO_SID=${TWILIO_SID:-fake}
+      - TWILIO_TOKEN=${TWILIO_TOKEN:-fake}
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - notify
+
+  worker-email:
+    build: ./worker
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - CHANNEL=email
+      - SENDGRID_API_KEY=${SENDGRID_API_KEY:-fake}
+    depends_on:
+      - redis
+    networks:
+      - notify
+
+  worker-sms:
+    build: ./worker
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - CHANNEL=sms
+      - TWILIO_SID=${TWILIO_SID:-fake}
+      - TWILIO_TOKEN=${TWILIO_TOKEN:-fake}
+    depends_on:
+      - redis
+    networks:
+      - notify
+
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: notify
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: notify
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./database/init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - notify
+
+  redis:
+    image: redis:alpine
+    networks:
+      - notify
+
+  mailhog:
+    image: mailhog/mailhog
+    ports:
+      - "8025:8025"
+    networks:
+      - notify
+
+networks:
+  notify:
+    driver: bridge
+
+volumes:
+  postgres_data:

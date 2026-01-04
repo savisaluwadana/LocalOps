@@ -1,0 +1,67 @@
+version: '3.8'
+
+services:
+  api:
+    build: ./api
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgres://booking:password@postgres:5432/booking
+      - REDIS_URL=redis://redis:6379
+      - RABBITMQ_URL=amqp://rabbitmq:5672
+    depends_on:
+      - postgres
+      - redis
+      - rabbitmq
+    networks:
+      - booking
+
+  notification-worker:
+    build: ./worker
+    environment:
+      - RABBITMQ_URL=amqp://rabbitmq:5672
+      - SMTP_HOST=mailhog
+      - SMTP_PORT=1025
+    depends_on:
+      - rabbitmq
+      - mailhog
+    networks:
+      - booking
+
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: booking
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: booking
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./database/init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - booking
+
+  redis:
+    image: redis:alpine
+    networks:
+      - booking
+
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    ports:
+      - "15672:15672"
+    networks:
+      - booking
+
+  mailhog:
+    image: mailhog/mailhog
+    ports:
+      - "8025:8025"
+    networks:
+      - booking
+
+networks:
+  booking:
+    driver: bridge
+
+volumes:
+  postgres_data:

@@ -1,0 +1,58 @@
+version: '3.8'
+
+services:
+  chat-server:
+    build: ./server
+    ports:
+      - "8000:8000"
+    environment:
+      - MONGODB_URI=mongodb://mongo:27017/chat
+      - REDIS_URL=redis://redis:6379
+      - JWT_SECRET=chat-secret
+    depends_on:
+      - mongo
+      - redis
+    networks:
+      - chat
+
+  web:
+    build: ./web
+    ports:
+      - "3000:3000"
+    environment:
+      - REACT_APP_WS_URL=ws://localhost:8000
+    networks:
+      - chat
+
+  mongo:
+    image: mongo:6
+    volumes:
+      - mongo_data:/data/db
+    networks:
+      - chat
+
+  redis:
+    image: redis:alpine
+    networks:
+      - chat
+
+  minio:
+    image: minio/minio
+    command: server /data --console-address ":9001"
+    ports:
+      - "9000:9000"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    volumes:
+      - minio_data:/data
+    networks:
+      - chat
+
+networks:
+  chat:
+    driver: bridge
+
+volumes:
+  mongo_data:
+  minio_data:

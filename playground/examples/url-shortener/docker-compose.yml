@@ -1,0 +1,74 @@
+version: '3.8'
+
+services:
+  api:
+    build: ./api
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgres://shortener:password@postgres:5432/shortener
+      - REDIS_URL=redis://redis:6379
+      - RABBITMQ_URL=amqp://rabbitmq:5672
+      - BASE_URL=http://localhost:8000
+    depends_on:
+      - postgres
+      - redis
+      - rabbitmq
+    networks:
+      - shortener
+
+  analytics-worker:
+    build: ./worker
+    environment:
+      - RABBITMQ_URL=amqp://rabbitmq:5672
+      - CLICKHOUSE_URL=http://clickhouse:8123
+    depends_on:
+      - rabbitmq
+      - clickhouse
+    networks:
+      - shortener
+
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: shortener
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: shortener
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./database/init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - shortener
+
+  redis:
+    image: redis:alpine
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    networks:
+      - shortener
+
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    ports:
+      - "15672:15672"
+    networks:
+      - shortener
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:latest
+    ports:
+      - "8123:8123"
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+    networks:
+      - shortener
+
+networks:
+  shortener:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  redis_data:
+  clickhouse_data:
