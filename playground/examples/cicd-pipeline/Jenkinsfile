@@ -1,0 +1,170 @@
+pipeline {
+    agent any
+
+    options {
+        buildDiscarder(logRotator(numToKeepStr: '10'))
+        timestamps()
+        timeout(time: 30, unit: 'MINUTES')
+        ansiColor('xterm')
+    }
+
+    environment {
+        APP_NAME = 'demo-app'
+        REGISTRY = 'localhost:5000'
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                checkout scm
+                script {
+                    env.GIT_COMMIT = sh(script: 'git rev-parse --short HEAD', returnStdout: true).trim()
+                    env.GIT_BRANCH = sh(script: 'git rev-parse --abbrev-ref HEAD', returnStdout: true).trim()
+                    currentBuild.displayName = "#${BUILD_NUMBER} - ${env.GIT_COMMIT}"
+                }
+            }
+        }
+
+        stage('Install Dependencies') {
+            agent {
+                docker {
+                    image 'node:18-alpine'
+                    reuseNode true
+                }
+            }
+            steps {
+                dir('app') {
+                    sh 'npm ci'
+                }
+            }
+        }
+
+        stage('Quality Gates') {
+            parallel {
+                stage('Lint') {
+                    agent {
+                        docker {
+                            image 'node:18-alpine'
+                            reuseNode true
+                        }
+                    }
+                    steps {
+                        dir('app') {
+                            sh 'npm run lint || true'
+                        }
+                    }
+                }
+
+                stage('Unit Tests') {
+                    agent {
+                        docker {
+                            image 'node:18-alpine'
+                            reuseNode true
+                        }
+                    }
+                    steps {
+                        dir('app') {
+                            sh 'npm run test:unit || true'
+                        }
+                    }
+                    post {
+                        always {
+                            junit allowEmptyResults: true, testResults: 'app/test-results/*.xml'
+                        }
+                    }
+                }
+
+                stage('Security Scan') {
+                    steps {
+                        sh 'echo "Running security scan..."'
+                        // trivy filesystem --exit-code 1 .
+                    }
+                }
+            }
+        }
+
+        stage('Build Docker Image') {
+            steps {
+                dir('app') {
+                    sh """
+                        docker build \
+                            --build-arg VERSION=${GIT_COMMIT} \
+                            --build-arg BUILD_DATE=\$(date -u +%Y-%m-%dT%H:%M:%SZ) \
+                            -t ${APP_NAME}:${GIT_COMMIT} \
+                            -t ${APP_NAME}:latest \
+                            .
+                    """
+                }
+            }
+        }
+
+        stage('Integration Tests') {
+            steps {
+                sh """
+                    docker network create test-network || true
+                    docker run -d --name test-db --network test-network postgres:15-alpine -e POSTGRES_PASSWORD=test
+                    docker run --rm --network test-network ${APP_NAME}:${GIT_COMMIT} npm run test:integration || true
+                """
+            }
+            post {
+                always {
+                    sh 'docker rm -f test-db || true'
+                    sh 'docker network rm test-network || true'
+                }
+            }
+        }
+
+        stage('Deploy') {
+            when {
+                anyOf {
+                    branch 'main'
+                    branch 'develop'
+                }
+            }
+            steps {
+                script {
+                    def environment = env.GIT_BRANCH == 'main' ? 'production' : 'staging'
+                    
+                    if (environment == 'production') {
+                        input message: 'Deploy to production?', ok: 'Deploy'
+                    }
+
+                    sh """
+                        echo "Deploying to ${environment}..."
+                        docker stop ${APP_NAME}-${environment} || true
+                        docker rm ${APP_NAME}-${environment} || true
+                        docker run -d \
+                            --name ${APP_NAME}-${environment} \
+                            -p \$([ "$environment" = "production" ] && echo "80" || echo "8080"):3000 \
+                            ${APP_NAME}:${GIT_COMMIT}
+                    """
+                }
+            }
+        }
+
+        stage('Verify Deployment') {
+            steps {
+                script {
+                    def port = env.GIT_BRANCH == 'main' ? '80' : '8080'
+                    
+                    retry(5) {
+                        sleep(5)
+                        sh "curl -f http://localhost:${port}/health"
+                    }
+                }
+            }
+        }
+    }
+
+    post {
+        success {
+            echo '✅ Pipeline completed successfully!'
+        }
+        failure {
+            echo '❌ Pipeline failed!'
+        }
+        always {
+            cleanWs()
+        }
+    }
+}

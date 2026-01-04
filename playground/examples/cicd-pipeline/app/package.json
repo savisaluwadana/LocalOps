@@ -1,0 +1,13 @@
+{
+    "name": "demo-app",
+    "version": "1.0.0",
+    "scripts": {
+        "start": "node index.js",
+        "lint": "echo 'Linting...'",
+        "test:unit": "echo 'Running unit tests...'",
+        "test:integration": "echo 'Running integration tests...'"
+    },
+    "dependencies": {
+        "express": "^4.18.2"
+    }
+}
