@@ -1,0 +1,218 @@
+# Multi-Cloud Development Environment
+
+services:
+  # ============================================================================
+  # CONSUL - Service Mesh & Service Discovery
+  # ============================================================================
+  consul:
+    image: hashicorp/consul:1.17
+    container_name: consul
+    ports:
+      - "8500:8500"
+      - "8600:8600/udp"
+    command: agent -dev -client=0.0.0.0 -ui
+    environment:
+      CONSUL_BIND_INTERFACE: eth0
+    networks:
+      - multicloud
+
+  # ============================================================================
+  # VAULT - Secrets Management
+  # ============================================================================
+  vault:
+    image: hashicorp/vault:1.15
+    container_name: vault
+    ports:
+      - "8200:8200"
+    environment:
+      VAULT_DEV_ROOT_TOKEN_ID: root
+      VAULT_DEV_LISTEN_ADDRESS: 0.0.0.0:8200
+    cap_add:
+      - IPC_LOCK
+    depends_on:
+      - consul
+    networks:
+      - multicloud
+
+  # ============================================================================
+  # PROMETHEUS - Metrics Collection
+  # ============================================================================
+  prometheus:
+    image: prom/prometheus:v2.48.0
+    container_name: prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - ./monitoring/prometheus/rules:/etc/prometheus/rules
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=15d'
+      - '--web.enable-lifecycle'
+      - '--web.enable-admin-api'
+    networks:
+      - multicloud
+
+  # ============================================================================
+  # GRAFANA - Visualization
+  # ============================================================================
+  grafana:
+    image: grafana/grafana:10.2.2
+    container_name: grafana
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_INSTALL_PLUGINS: grafana-piechart-panel
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      - prometheus
+    networks:
+      - multicloud
+
+  # ============================================================================
+  # ALERTMANAGER - Alert Management
+  # ============================================================================
+  alertmanager:
+    image: prom/alertmanager:v0.26.0
+    container_name: alertmanager
+    ports:
+      - "9093:9093"
+    volumes:
+      - ./monitoring/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml
+    command:
+      - '--config.file=/etc/alertmanager/alertmanager.yml'
+    networks:
+      - multicloud
+
+  # ============================================================================
+  # POSTGRESQL - Database
+  # ============================================================================
+  postgres:
+    image: postgres:16-alpine
+    container_name: postgres
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: multicloud
+      POSTGRES_DB: multicloud
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./database/init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U admin -d multicloud"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - multicloud
+
+  # ============================================================================
+  # REDIS - Caching
+  # ============================================================================
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - multicloud
+
+  # ============================================================================
+  # LOCALSTACK - AWS Emulator
+  # ============================================================================
+  localstack:
+    image: localstack/localstack:3.0
+    container_name: localstack
+    ports:
+      - "4566:4566"
+      - "4510-4559:4510-4559"
+    environment:
+      DEBUG: 1
+      SERVICES: s3,sqs,sns,dynamodb,secretsmanager,kms,iam
+      DEFAULT_REGION: us-east-1
+    volumes:
+      - localstack_data:/var/lib/localstack
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - multicloud
+
+  # ============================================================================
+  # GCP EMULATOR - Firebase/GCP Emulator
+  # ============================================================================
+  gcp-emulator:
+    image: google/cloud-sdk:slim
+    container_name: gcp-emulator
+    ports:
+      - "8085:8085"  # Pub/Sub
+      - "9010:9010"  # Firestore
+    command: |
+      bash -c "
+        gcloud beta emulators pubsub start --host-port=0.0.0.0:8085 &
+        gcloud beta emulators firestore start --host-port=0.0.0.0:9010 &
+        wait
+      "
+    networks:
+      - multicloud
+
+  # ============================================================================
+  # OPA - Policy Engine
+  # ============================================================================
+  opa:
+    image: openpolicyagent/opa:latest-envoy
+    container_name: opa
+    ports:
+      - "8181:8181"
+    command:
+      - run
+      - --server
+      - --addr=0.0.0.0:8181
+      - --log-level=debug
+    volumes:
+      - ./policies/opa:/policies
+    networks:
+      - multicloud
+
+  # ============================================================================
+  # COST DASHBOARD - FinOps
+  # ============================================================================
+  infracost:
+    image: infracost/infracost:latest
+    container_name: infracost
+    volumes:
+      - ./terraform:/code
+      - infracost_data:/root/.cache/infracost
+    environment:
+      INFRACOST_API_KEY: ${INFRACOST_API_KEY:-}
+    profiles:
+      - tools
+    networks:
+      - multicloud
+
+networks:
+  multicloud:
+    driver: bridge
+
+volumes:
+  prometheus_data:
+  grafana_data:
+  postgres_data:
+  redis_data:
+  localstack_data:
+  infracost_data:

@@ -1,0 +1,317 @@
+# SLO Specifications using Sloth
+
+# API Gateway SLO
+apiVersion: sloth.slok.dev/v1
+kind: PrometheusServiceLevel
+metadata:
+  name: api-gateway-slo
+  namespace: monitoring
+spec:
+  service: "api-gateway"
+  labels:
+    owner: platform-team
+    tier: "1"
+    team: platform
+  slos:
+    # Availability SLO
+    - name: "requests-availability"
+      objective: 99.9
+      description: "API Gateway should be available 99.9% of the time"
+      sli:
+        events:
+          errorQuery: sum(rate(http_requests_total{job="api-gateway",status=~"5.."}[{{.window}}]))
+          totalQuery: sum(rate(http_requests_total{job="api-gateway"}[{{.window}}]))
+      alerting:
+        name: APIGatewayHighErrorRate
+        labels:
+          category: availability
+        annotations:
+          summary: "API Gateway error rate too high"
+          runbook: "https://runbooks.example.com/api-gateway-errors"
+        pageAlert:
+          labels:
+            severity: critical
+            routing: pagerduty
+        ticketAlert:
+          labels:
+            severity: warning
+            routing: slack
+
+    # Latency SLO
+    - name: "requests-latency"
+      objective: 99.0
+      description: "99% of requests should complete within 500ms"
+      sli:
+        events:
+          errorQuery: |
+            sum(rate(http_request_duration_seconds_bucket{job="api-gateway",le="0.5"}[{{.window}}]))
+          totalQuery: |
+            sum(rate(http_request_duration_seconds_count{job="api-gateway"}[{{.window}}]))
+      alerting:
+        name: APIGatewayHighLatency
+        labels:
+          category: latency
+        annotations:
+          summary: "API Gateway latency SLO breach"
+          runbook: "https://runbooks.example.com/api-gateway-latency"
+---
+# Payment Service SLO
+apiVersion: sloth.slok.dev/v1
+kind: PrometheusServiceLevel
+metadata:
+  name: payment-service-slo
+  namespace: monitoring
+spec:
+  service: "payment-service"
+  labels:
+    owner: payments-team
+    tier: "1"
+    team: payments
+    compliance: pci-dss
+  slos:
+    # Availability SLO - Higher for payment service
+    - name: "payment-availability"
+      objective: 99.99
+      description: "Payment service must be available 99.99% of the time"
+      sli:
+        events:
+          errorQuery: sum(rate(payment_requests_total{status="error"}[{{.window}}]))
+          totalQuery: sum(rate(payment_requests_total[{{.window}}]))
+      alerting:
+        name: PaymentServiceDown
+        labels:
+          category: availability
+          compliance: pci-dss
+        annotations:
+          summary: "CRITICAL: Payment service error rate breach"
+          runbook: "https://runbooks.example.com/payment-service-down"
+        pageAlert:
+          labels:
+            severity: critical
+            routing: pagerduty-critical
+
+    # Transaction Success Rate
+    - name: "transaction-success"
+      objective: 99.5
+      description: "99.5% of transactions should succeed"
+      sli:
+        events:
+          errorQuery: |
+            sum(rate(payment_transactions_total{status=~"failed|declined"}[{{.window}}]))
+          totalQuery: sum(rate(payment_transactions_total[{{.window}}]))
+      alerting:
+        name: PaymentTransactionFailures
+        labels:
+          category: reliability
+        annotations:
+          summary: "High payment transaction failure rate"
+---
+# Database Service SLO
+apiVersion: sloth.slok.dev/v1
+kind: PrometheusServiceLevel
+metadata:
+  name: database-slo
+  namespace: monitoring
+spec:
+  service: "database"
+  labels:
+    owner: dba-team
+    tier: "1"
+    team: infrastructure
+  slos:
+    # Query Latency SLO
+    - name: "query-latency-p99"
+      objective: 99.0
+      description: "99% of queries should complete within 100ms"
+      sli:
+        events:
+          errorQuery: |
+            sum(rate(pg_query_duration_seconds_bucket{le="0.1"}[{{.window}}]))
+          totalQuery: |
+            sum(rate(pg_query_duration_seconds_count[{{.window}}]))
+      alerting:
+        name: DatabaseSlowQueries
+        annotations:
+          summary: "Database query latency SLO breach"
+
+    # Connection Pool SLO
+    - name: "connection-availability"
+      objective: 99.9
+      description: "Database connections should be available"
+      sli:
+        events:
+          errorQuery: |
+            sum(rate(pg_connection_errors_total[{{.window}}]))
+          totalQuery: |
+            sum(rate(pg_connections_total[{{.window}}]))
+      alerting:
+        name: DatabaseConnectionIssues
+        annotations:
+          summary: "Database connection pool issues"
+---
+# Kubernetes Infrastructure SLO
+apiVersion: sloth.slok.dev/v1
+kind: PrometheusServiceLevel
+metadata:
+  name: kubernetes-slo
+  namespace: monitoring
+spec:
+  service: "kubernetes"
+  labels:
+    owner: platform-team
+    tier: "0"
+    team: sre
+  slos:
+    # API Server Availability
+    - name: "apiserver-availability"
+      objective: 99.99
+      description: "Kubernetes API server should be available"
+      sli:
+        events:
+          errorQuery: |
+            sum(rate(apiserver_request_total{code=~"5.."}[{{.window}}]))
+          totalQuery: |
+            sum(rate(apiserver_request_total[{{.window}}]))
+      alerting:
+        name: KubernetesAPIServerDown
+        labels:
+          category: infrastructure
+        annotations:
+          summary: "CRITICAL: Kubernetes API server errors"
+        pageAlert:
+          labels:
+            severity: critical
+            routing: pagerduty-infra
+
+    # Pod Scheduling Success
+    - name: "pod-scheduling"
+      objective: 99.9
+      description: "Pod scheduling should succeed"
+      sli:
+        events:
+          errorQuery: |
+            sum(rate(scheduler_schedule_attempts_total{result="error"}[{{.window}}]))
+          totalQuery: |
+            sum(rate(scheduler_schedule_attempts_total[{{.window}}]))
+      alerting:
+        name: PodSchedulingFailures
+        annotations:
+          summary: "Pod scheduling failures detected"
+---
+# OpenTelemetry Configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: otel-collector-config
+  namespace: monitoring
+data:
+  config.yaml: |
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+            endpoint: 0.0.0.0:4317
+          http:
+            endpoint: 0.0.0.0:4318
+
+      prometheus:
+        config:
+          scrape_configs:
+            - job_name: 'otel-collector'
+              scrape_interval: 10s
+              static_configs:
+                - targets: ['0.0.0.0:8888']
+
+      jaeger:
+        protocols:
+          thrift_http:
+            endpoint: 0.0.0.0:14268
+          grpc:
+            endpoint: 0.0.0.0:14250
+
+      zipkin:
+        endpoint: 0.0.0.0:9411
+
+    processors:
+      batch:
+        timeout: 10s
+        send_batch_size: 10000
+
+      memory_limiter:
+        check_interval: 1s
+        limit_mib: 2000
+        spike_limit_mib: 500
+
+      resourcedetection:
+        detectors: [env, system, gcp, aws, azure]
+        timeout: 5s
+
+      attributes:
+        actions:
+          - key: environment
+            value: production
+            action: upsert
+
+      tail_sampling:
+        decision_wait: 10s
+        num_traces: 100000
+        expected_new_traces_per_sec: 1000
+        policies:
+          - name: errors-policy
+            type: status_code
+            status_code: {status_codes: [ERROR]}
+          - name: slow-traces
+            type: latency
+            latency: {threshold_ms: 1000}
+          - name: probabilistic
+            type: probabilistic
+            probabilistic: {sampling_percentage: 10}
+
+    exporters:
+      prometheus:
+        endpoint: "0.0.0.0:8889"
+        namespace: otel
+
+      otlp/tempo:
+        endpoint: tempo:4317
+        tls:
+          insecure: true
+
+      loki:
+        endpoint: http://loki:3100/loki/api/v1/push
+        labels:
+          resource:
+            service.name: "service"
+            service.namespace: "namespace"
+          attributes:
+            level: ""
+            severity: ""
+
+      debug:
+        verbosity: detailed
+
+    extensions:
+      health_check:
+        endpoint: 0.0.0.0:13133
+      pprof:
+        endpoint: 0.0.0.0:1777
+      zpages:
+        endpoint: 0.0.0.0:55679
+
+    service:
+      extensions: [health_check, pprof, zpages]
+      pipelines:
+        traces:
+          receivers: [otlp, jaeger, zipkin]
+          processors: [memory_limiter, resourcedetection, tail_sampling, batch]
+          exporters: [otlp/tempo]
+
+        metrics:
+          receivers: [otlp, prometheus]
+          processors: [memory_limiter, resourcedetection, batch]
+          exporters: [prometheus]
+
+        logs:
+          receivers: [otlp]
+          processors: [memory_limiter, resourcedetection, attributes, batch]
+          exporters: [loki]

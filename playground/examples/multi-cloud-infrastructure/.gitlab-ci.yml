@@ -1,0 +1,372 @@
+# Multi-Cloud Infrastructure - GitLab CI/CD Pipeline
+
+stages:
+  - validate
+  - plan
+  - security
+  - deploy
+  - verify
+
+variables:
+  TF_VERSION: "1.6.0"
+  TF_ROOT: "${CI_PROJECT_DIR}/terraform"
+  PLAN_JSON: "plan.json"
+
+# ==============================================================================
+# TEMPLATES
+# ==============================================================================
+
+.terraform_base:
+  image:
+    name: hashicorp/terraform:${TF_VERSION}
+    entrypoint: [""]
+  before_script:
+    - cd ${TF_ROOT}
+    - terraform init -backend-config="environments/${ENVIRONMENT}/backend.hcl"
+
+# ==============================================================================
+# VALIDATE STAGE
+# ==============================================================================
+
+validate:lint:
+  stage: validate
+  image: ghcr.io/terraform-linters/tflint:latest
+  script:
+    - tflint --init
+    - tflint --recursive
+  rules:
+    - if: $CI_MERGE_REQUEST_IID
+    - if: $CI_COMMIT_BRANCH
+
+validate:fmt:
+  stage: validate
+  extends: .terraform_base
+  script:
+    - terraform fmt -check -recursive -diff
+  rules:
+    - if: $CI_MERGE_REQUEST_IID
+
+validate:docs:
+  stage: validate
+  image: quay.io/terraform-docs/terraform-docs:latest
+  script:
+    - terraform-docs markdown table --output-file README.md --output-mode inject ${TF_ROOT}/modules/aws/eks
+    - terraform-docs markdown table --output-file README.md --output-mode inject ${TF_ROOT}/modules/gcp/gke
+    - terraform-docs markdown table --output-file README.md --output-mode inject ${TF_ROOT}/modules/azure/aks
+    - git diff --exit-code || (echo "Docs need updating" && exit 1)
+  rules:
+    - if: $CI_MERGE_REQUEST_IID
+
+# ==============================================================================
+# PLAN STAGE - DEV
+# ==============================================================================
+
+plan:dev:aws:
+  stage: plan
+  extends: .terraform_base
+  variables:
+    ENVIRONMENT: dev
+  script:
+    - terraform workspace select aws-dev || terraform workspace new aws-dev
+    - terraform plan -var-file="environments/dev/aws.tfvars" -out=aws-dev.plan
+    - terraform show -json aws-dev.plan > aws-dev-${PLAN_JSON}
+  artifacts:
+    paths:
+      - ${TF_ROOT}/aws-dev.plan
+      - ${TF_ROOT}/aws-dev-${PLAN_JSON}
+    expire_in: 7 days
+  rules:
+    - if: $CI_COMMIT_BRANCH == "develop"
+    - if: $CI_MERGE_REQUEST_IID
+
+plan:dev:gcp:
+  stage: plan
+  extends: .terraform_base
+  variables:
+    ENVIRONMENT: dev
+  script:
+    - terraform workspace select gcp-dev || terraform workspace new gcp-dev
+    - terraform plan -var-file="environments/dev/gcp.tfvars" -out=gcp-dev.plan
+    - terraform show -json gcp-dev.plan > gcp-dev-${PLAN_JSON}
+  artifacts:
+    paths:
+      - ${TF_ROOT}/gcp-dev.plan
+      - ${TF_ROOT}/gcp-dev-${PLAN_JSON}
+    expire_in: 7 days
+  rules:
+    - if: $CI_COMMIT_BRANCH == "develop"
+    - if: $CI_MERGE_REQUEST_IID
+
+# ==============================================================================
+# PLAN STAGE - PRODUCTION
+# ==============================================================================
+
+plan:prod:aws:
+  stage: plan
+  extends: .terraform_base
+  variables:
+    ENVIRONMENT: production
+  script:
+    - terraform workspace select aws-prod || terraform workspace new aws-prod
+    - terraform plan -var-file="environments/production/aws.tfvars" -out=aws-prod.plan
+    - terraform show -json aws-prod.plan > aws-prod-${PLAN_JSON}
+  artifacts:
+    paths:
+      - ${TF_ROOT}/aws-prod.plan
+      - ${TF_ROOT}/aws-prod-${PLAN_JSON}
+    expire_in: 30 days
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+plan:prod:gcp:
+  stage: plan
+  extends: .terraform_base
+  variables:
+    ENVIRONMENT: production
+  script:
+    - terraform workspace select gcp-prod || terraform workspace new gcp-prod
+    - terraform plan -var-file="environments/production/gcp.tfvars" -out=gcp-prod.plan
+    - terraform show -json gcp-prod.plan > gcp-prod-${PLAN_JSON}
+  artifacts:
+    paths:
+      - ${TF_ROOT}/gcp-prod.plan
+      - ${TF_ROOT}/gcp-prod-${PLAN_JSON}
+    expire_in: 30 days
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+plan:prod:azure:
+  stage: plan
+  extends: .terraform_base
+  variables:
+    ENVIRONMENT: production
+  script:
+    - terraform workspace select azure-prod || terraform workspace new azure-prod
+    - terraform plan -var-file="environments/production/azure.tfvars" -out=azure-prod.plan
+    - terraform show -json azure-prod.plan > azure-prod-${PLAN_JSON}
+  artifacts:
+    paths:
+      - ${TF_ROOT}/azure-prod.plan
+      - ${TF_ROOT}/azure-prod-${PLAN_JSON}
+    expire_in: 30 days
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+# ==============================================================================
+# SECURITY STAGE
+# ==============================================================================
+
+security:checkov:
+  stage: security
+  image:
+    name: bridgecrew/checkov:latest
+    entrypoint: [""]
+  script:
+    - checkov -d ${TF_ROOT} --framework terraform --output junitxml --output-file-path ${CI_PROJECT_DIR}/ --soft-fail
+  artifacts:
+    reports:
+      junit: results_junitxml.xml
+    when: always
+  rules:
+    - if: $CI_MERGE_REQUEST_IID
+    - if: $CI_COMMIT_BRANCH
+
+security:tfsec:
+  stage: security
+  image:
+    name: aquasec/tfsec:latest
+    entrypoint: [""]
+  script:
+    - tfsec ${TF_ROOT} --format junit --out tfsec-report.xml --soft-fail
+  artifacts:
+    reports:
+      junit: tfsec-report.xml
+    when: always
+  rules:
+    - if: $CI_MERGE_REQUEST_IID
+    - if: $CI_COMMIT_BRANCH
+
+security:infracost:
+  stage: security
+  image:
+    name: infracost/infracost:latest
+    entrypoint: [""]
+  script:
+    - infracost breakdown --path ${TF_ROOT} --format json --out-file infracost.json
+    - infracost output --path infracost.json --format table
+  artifacts:
+    paths:
+      - infracost.json
+    expire_in: 30 days
+  rules:
+    - if: $CI_MERGE_REQUEST_IID
+    - if: $CI_COMMIT_BRANCH
+
+security:opa:
+  stage: security
+  image: openpolicyagent/opa:latest
+  script:
+    - opa eval --bundle ${CI_PROJECT_DIR}/policies/opa --input ${TF_ROOT}/aws-dev-${PLAN_JSON} --format pretty "data.terraform.deny"
+  needs:
+    - plan:dev:aws
+  rules:
+    - if: $CI_MERGE_REQUEST_IID
+
+# ==============================================================================
+# DEPLOY STAGE - DEV
+# ==============================================================================
+
+deploy:dev:aws:
+  stage: deploy
+  extends: .terraform_base
+  variables:
+    ENVIRONMENT: dev
+  script:
+    - terraform workspace select aws-dev
+    - terraform apply -auto-approve aws-dev.plan
+    - terraform output -json > aws-dev-outputs.json
+  artifacts:
+    paths:
+      - ${TF_ROOT}/aws-dev-outputs.json
+    expire_in: 30 days
+  needs:
+    - plan:dev:aws
+    - security:checkov
+  environment:
+    name: dev/aws
+    url: https://dev-aws.multicloud.example.com
+  rules:
+    - if: $CI_COMMIT_BRANCH == "develop"
+
+deploy:dev:gcp:
+  stage: deploy
+  extends: .terraform_base
+  variables:
+    ENVIRONMENT: dev
+  script:
+    - terraform workspace select gcp-dev
+    - terraform apply -auto-approve gcp-dev.plan
+    - terraform output -json > gcp-dev-outputs.json
+  artifacts:
+    paths:
+      - ${TF_ROOT}/gcp-dev-outputs.json
+    expire_in: 30 days
+  needs:
+    - plan:dev:gcp
+    - security:checkov
+  environment:
+    name: dev/gcp
+    url: https://dev-gcp.multicloud.example.com
+  rules:
+    - if: $CI_COMMIT_BRANCH == "develop"
+
+# ==============================================================================
+# DEPLOY STAGE - PRODUCTION (Manual)
+# ==============================================================================
+
+deploy:prod:aws:
+  stage: deploy
+  extends: .terraform_base
+  variables:
+    ENVIRONMENT: production
+  script:
+    - terraform workspace select aws-prod
+    - terraform apply -auto-approve aws-prod.plan
+    - terraform output -json > aws-prod-outputs.json
+  artifacts:
+    paths:
+      - ${TF_ROOT}/aws-prod-outputs.json
+    expire_in: 90 days
+  needs:
+    - plan:prod:aws
+    - security:checkov
+    - security:tfsec
+    - security:infracost
+  environment:
+    name: production/aws
+    url: https://aws.multicloud.example.com
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+  when: manual
+
+deploy:prod:gcp:
+  stage: deploy
+  extends: .terraform_base
+  variables:
+    ENVIRONMENT: production
+  script:
+    - terraform workspace select gcp-prod
+    - terraform apply -auto-approve gcp-prod.plan
+    - terraform output -json > gcp-prod-outputs.json
+  artifacts:
+    paths:
+      - ${TF_ROOT}/gcp-prod-outputs.json
+    expire_in: 90 days
+  needs:
+    - plan:prod:gcp
+    - security:checkov
+    - deploy:prod:aws
+  environment:
+    name: production/gcp
+    url: https://gcp.multicloud.example.com
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+  when: manual
+
+deploy:prod:azure:
+  stage: deploy
+  extends: .terraform_base
+  variables:
+    ENVIRONMENT: production
+  script:
+    - terraform workspace select azure-prod
+    - terraform apply -auto-approve azure-prod.plan
+    - terraform output -json > azure-prod-outputs.json
+  artifacts:
+    paths:
+      - ${TF_ROOT}/azure-prod-outputs.json
+    expire_in: 90 days
+  needs:
+    - plan:prod:azure
+    - security:checkov
+    - deploy:prod:gcp
+  environment:
+    name: production/azure
+    url: https://azure.multicloud.example.com
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+  when: manual
+
+# ==============================================================================
+# VERIFY STAGE
+# ==============================================================================
+
+verify:connectivity:
+  stage: verify
+  image: bitnami/kubectl:latest
+  script:
+    # Verify AWS EKS
+    - aws eks update-kubeconfig --name multicloud-${ENVIRONMENT} --region us-east-1
+    - kubectl get nodes
+    - kubectl cluster-info
+    
+    # Verify GCP GKE
+    - gcloud container clusters get-credentials multicloud-${ENVIRONMENT} --region us-central1
+    - kubectl get nodes
+    - kubectl cluster-info
+  needs:
+    - deploy:dev:aws
+    - deploy:dev:gcp
+  rules:
+    - if: $CI_COMMIT_BRANCH == "develop"
+
+verify:smoke-tests:
+  stage: verify
+  image: curlimages/curl:latest
+  script:
+    - curl -f https://dev-aws.multicloud.example.com/health || exit 1
+    - curl -f https://dev-gcp.multicloud.example.com/health || exit 1
+  needs:
+    - verify:connectivity
+  rules:
+    - if: $CI_COMMIT_BRANCH == "develop"

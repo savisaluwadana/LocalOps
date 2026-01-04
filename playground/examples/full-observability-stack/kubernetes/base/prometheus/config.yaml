@@ -1,0 +1,304 @@
+# Prometheus Configuration with Recording & Alerting Rules
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-config
+  namespace: monitoring
+data:
+  prometheus.yml: |
+    global:
+      scrape_interval: 15s
+      evaluation_interval: 15s
+      external_labels:
+        cluster: production
+        region: us-east-1
+
+    # Alertmanager configuration
+    alerting:
+      alertmanagers:
+        - static_configs:
+            - targets:
+                - alertmanager:9093
+          scheme: http
+          timeout: 10s
+          api_version: v2
+
+    # Remote write to Mimir for long-term storage
+    remote_write:
+      - url: http://mimir-distributor:9009/api/v1/push
+        remote_timeout: 30s
+        queue_config:
+          capacity: 10000
+          max_shards: 50
+          max_samples_per_send: 2000
+
+    # Rule files
+    rule_files:
+      - /etc/prometheus/rules/*.yaml
+
+    # Scrape configurations
+    scrape_configs:
+      # Kubernetes API server
+      - job_name: 'kubernetes-apiservers'
+        kubernetes_sd_configs:
+          - role: endpoints
+        scheme: https
+        tls_config:
+          ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+        bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_namespace, __meta_kubernetes_service_name, __meta_kubernetes_endpoint_port_name]
+            action: keep
+            regex: default;kubernetes;https
+
+      # Kubernetes nodes
+      - job_name: 'kubernetes-nodes'
+        kubernetes_sd_configs:
+          - role: node
+        scheme: https
+        tls_config:
+          ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+        bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+        relabel_configs:
+          - action: labelmap
+            regex: __meta_kubernetes_node_label_(.+)
+
+      # Kubelet metrics
+      - job_name: 'kubernetes-nodes-cadvisor'
+        kubernetes_sd_configs:
+          - role: node
+        scheme: https
+        tls_config:
+          ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+        bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+        metrics_path: /metrics/cadvisor
+        relabel_configs:
+          - action: labelmap
+            regex: __meta_kubernetes_node_label_(.+)
+
+      # Kubernetes service endpoints
+      - job_name: 'kubernetes-service-endpoints'
+        kubernetes_sd_configs:
+          - role: endpoints
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_service_annotation_prometheus_io_scrape]
+            action: keep
+            regex: true
+          - source_labels: [__meta_kubernetes_service_annotation_prometheus_io_scheme]
+            action: replace
+            target_label: __scheme__
+            regex: (https?)
+          - source_labels: [__meta_kubernetes_service_annotation_prometheus_io_path]
+            action: replace
+            target_label: __metrics_path__
+            regex: (.+)
+          - source_labels: [__address__, __meta_kubernetes_service_annotation_prometheus_io_port]
+            action: replace
+            target_label: __address__
+            regex: ([^:]+)(?::\d+)?;(\d+)
+            replacement: $1:$2
+          - action: labelmap
+            regex: __meta_kubernetes_service_label_(.+)
+          - source_labels: [__meta_kubernetes_namespace]
+            action: replace
+            target_label: kubernetes_namespace
+          - source_labels: [__meta_kubernetes_service_name]
+            action: replace
+            target_label: kubernetes_name
+
+      # Kubernetes pods
+      - job_name: 'kubernetes-pods'
+        kubernetes_sd_configs:
+          - role: pod
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+            action: keep
+            regex: true
+          - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scheme]
+            action: replace
+            regex: (https?)
+            target_label: __scheme__
+          - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path]
+            action: replace
+            target_label: __metrics_path__
+            regex: (.+)
+          - source_labels: [__address__, __meta_kubernetes_pod_annotation_prometheus_io_port]
+            action: replace
+            regex: ([^:]+)(?::\d+)?;(\d+)
+            replacement: $1:$2
+            target_label: __address__
+          - action: labelmap
+            regex: __meta_kubernetes_pod_label_(.+)
+          - source_labels: [__meta_kubernetes_namespace]
+            action: replace
+            target_label: kubernetes_namespace
+          - source_labels: [__meta_kubernetes_pod_name]
+            action: replace
+            target_label: kubernetes_pod_name
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-rules
+  namespace: monitoring
+data:
+  recording-rules.yaml: |
+    groups:
+      - name: kubernetes-recording-rules
+        interval: 30s
+        rules:
+          # Node CPU usage
+          - record: instance:node_cpu_utilisation:rate5m
+            expr: |
+              1 - avg without(cpu) (
+                rate(node_cpu_seconds_total{mode="idle"}[5m])
+              )
+
+          # Node memory usage
+          - record: instance:node_memory_utilisation:ratio
+            expr: |
+              1 - (
+                node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes
+              )
+
+          # Container CPU usage
+          - record: namespace_pod_container:container_cpu_usage_seconds_total:sum_rate
+            expr: |
+              sum by (namespace, pod, container) (
+                rate(container_cpu_usage_seconds_total[5m])
+              )
+
+          # Container memory usage
+          - record: namespace_pod_container:container_memory_working_set_bytes:sum
+            expr: |
+              sum by (namespace, pod, container) (
+                container_memory_working_set_bytes
+              )
+
+      - name: http-recording-rules
+        interval: 30s
+        rules:
+          # Request rate per service
+          - record: job:http_requests_total:rate5m
+            expr: sum by (job) (rate(http_requests_total[5m]))
+
+          # Error rate per service
+          - record: job:http_requests_errors_total:rate5m
+            expr: sum by (job) (rate(http_requests_total{status=~"5.."}[5m]))
+
+          # Availability
+          - record: job:http_requests_availability:ratio_rate5m
+            expr: |
+              1 - (
+                job:http_requests_errors_total:rate5m / job:http_requests_total:rate5m
+              )
+
+          # Latency percentiles
+          - record: job:http_request_duration_seconds:histogram_quantile_50
+            expr: |
+              histogram_quantile(0.5,
+                sum by (job, le) (rate(http_request_duration_seconds_bucket[5m]))
+              )
+
+          - record: job:http_request_duration_seconds:histogram_quantile_95
+            expr: |
+              histogram_quantile(0.95,
+                sum by (job, le) (rate(http_request_duration_seconds_bucket[5m]))
+              )
+
+          - record: job:http_request_duration_seconds:histogram_quantile_99
+            expr: |
+              histogram_quantile(0.99,
+                sum by (job, le) (rate(http_request_duration_seconds_bucket[5m]))
+              )
+
+  alerting-rules.yaml: |
+    groups:
+      - name: kubernetes-alerts
+        rules:
+          # High CPU usage on node
+          - alert: NodeHighCPU
+            expr: instance:node_cpu_utilisation:rate5m > 0.85
+            for: 15m
+            labels:
+              severity: warning
+            annotations:
+              summary: "High CPU usage on {{ $labels.instance }}"
+              description: "CPU usage is above 85% for 15 minutes"
+              runbook_url: "https://runbooks.example.com/node-high-cpu"
+
+          # High memory usage on node
+          - alert: NodeHighMemory
+            expr: instance:node_memory_utilisation:ratio > 0.90
+            for: 15m
+            labels:
+              severity: warning
+            annotations:
+              summary: "High memory usage on {{ $labels.instance }}"
+              description: "Memory usage is above 90% for 15 minutes"
+
+          # Pod not ready
+          - alert: KubePodNotReady
+            expr: |
+              sum by (namespace, pod, phase) (
+                kube_pod_status_phase{phase=~"Pending|Unknown"}
+              ) > 0
+            for: 15m
+            labels:
+              severity: critical
+            annotations:
+              summary: "Pod {{ $labels.namespace }}/{{ $labels.pod }} is not ready"
+              description: "Pod has been in {{ $labels.phase }} phase for 15 minutes"
+
+          # High restart count
+          - alert: KubePodCrashLooping
+            expr: |
+              rate(kube_pod_container_status_restarts_total[15m]) * 60 * 5 > 0
+            for: 15m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Pod {{ $labels.namespace }}/{{ $labels.pod }} is crash looping"
+
+          # PVC almost full
+          - alert: PersistentVolumeUsageHigh
+            expr: |
+              kubelet_volume_stats_used_bytes / kubelet_volume_stats_capacity_bytes > 0.85
+            for: 10m
+            labels:
+              severity: warning
+            annotations:
+              summary: "PVC {{ $labels.persistentvolumeclaim }} is almost full"
+
+      - name: service-alerts
+        rules:
+          # High error rate
+          - alert: HighErrorRate
+            expr: job:http_requests_errors_total:rate5m / job:http_requests_total:rate5m > 0.05
+            for: 5m
+            labels:
+              severity: critical
+            annotations:
+              summary: "High error rate for {{ $labels.job }}"
+              description: "Error rate is above 5% for 5 minutes"
+
+          # High latency P95
+          - alert: HighLatencyP95
+            expr: job:http_request_duration_seconds:histogram_quantile_95 > 1
+            for: 10m
+            labels:
+              severity: warning
+            annotations:
+              summary: "High P95 latency for {{ $labels.job }}"
+              description: "P95 latency is above 1 second for 10 minutes"
+
+          # Service down
+          - alert: ServiceDown
+            expr: up == 0
+            for: 5m
+            labels:
+              severity: critical
+            annotations:
+              summary: "Service {{ $labels.job }} is down"
+              description: "Service has been unreachable for 5 minutes"

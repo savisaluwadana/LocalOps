@@ -1,0 +1,259 @@
+# Kyverno Cluster Policies
+
+# Require Read-Only Root Filesystem
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-ro-rootfs
+  annotations:
+    policies.kyverno.io/title: Require Read-Only Root Filesystem
+    policies.kyverno.io/category: Pod Security Standards
+    policies.kyverno.io/severity: medium
+spec:
+  validationFailureAction: Enforce
+  background: true
+  rules:
+    - name: validate-readOnlyRootFilesystem
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+      exclude:
+        any:
+          - resources:
+              namespaces:
+                - kube-system
+                - istio-system
+      validate:
+        message: "Root filesystem must be read-only"
+        pattern:
+          spec:
+            containers:
+              - securityContext:
+                  readOnlyRootFilesystem: true
+---
+# Add Network Policy to New Namespaces
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: add-default-network-policy
+  annotations:
+    policies.kyverno.io/title: Add Default Network Policy
+    policies.kyverno.io/category: Security
+    policies.kyverno.io/severity: high
+spec:
+  rules:
+    - name: generate-default-deny
+      match:
+        any:
+          - resources:
+              kinds:
+                - Namespace
+      exclude:
+        any:
+          - resources:
+              names:
+                - kube-*
+                - default
+      generate:
+        apiVersion: networking.k8s.io/v1
+        kind: NetworkPolicy
+        name: default-deny-all
+        namespace: "{{request.object.metadata.name}}"
+        data:
+          spec:
+            podSelector: {}
+            policyTypes:
+              - Ingress
+              - Egress
+---
+# Require Security Context
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-security-context
+  annotations:
+    policies.kyverno.io/title: Require Security Context
+    policies.kyverno.io/category: Pod Security Standards
+    policies.kyverno.io/severity: high
+spec:
+  validationFailureAction: Enforce
+  background: true
+  rules:
+    - name: check-securitycontext
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+      exclude:
+        any:
+          - resources:
+              namespaces:
+                - kube-system
+      validate:
+        message: "Security context is required"
+        pattern:
+          spec:
+            securityContext:
+              runAsNonRoot: true
+              seccompProfile:
+                type: RuntimeDefault
+            containers:
+              - securityContext:
+                  allowPrivilegeEscalation: false
+                  capabilities:
+                    drop:
+                      - ALL
+---
+# Require Probes
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-probes
+  annotations:
+    policies.kyverno.io/title: Require Probes
+    policies.kyverno.io/category: Best Practices
+    policies.kyverno.io/severity: medium
+spec:
+  validationFailureAction: Audit
+  background: true
+  rules:
+    - name: validate-probes
+      match:
+        any:
+          - resources:
+              kinds:
+                - Deployment
+                - StatefulSet
+      validate:
+        message: "Liveness and readiness probes are required"
+        pattern:
+          spec:
+            template:
+              spec:
+                containers:
+                  - livenessProbe:
+                      periodSeconds: ">0"
+                    readinessProbe:
+                      periodSeconds: ">0"
+---
+# Add Pod Disruption Budget
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: add-pdb
+  annotations:
+    policies.kyverno.io/title: Add Pod Disruption Budget
+    policies.kyverno.io/category: Reliability
+spec:
+  rules:
+    - name: create-pdb
+      match:
+        any:
+          - resources:
+              kinds:
+                - Deployment
+      preconditions:
+        all:
+          - key: "{{request.object.spec.replicas}}"
+            operator: GreaterThan
+            value: 1
+      generate:
+        apiVersion: policy/v1
+        kind: PodDisruptionBudget
+        name: "{{request.object.metadata.name}}-pdb"
+        namespace: "{{request.object.metadata.namespace}}"
+        data:
+          spec:
+            minAvailable: 1
+            selector:
+              matchLabels: "{{request.object.spec.selector.matchLabels}}"
+---
+# Mutate: Add Default Security Context
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: add-default-securitycontext
+  annotations:
+    policies.kyverno.io/title: Add Default Security Context
+spec:
+  rules:
+    - name: add-securitycontext
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+      mutate:
+        patchStrategicMerge:
+          spec:
+            securityContext:
+              +(runAsNonRoot): true
+              +(seccompProfile):
+                type: RuntimeDefault
+            containers:
+              - (name): "*"
+                +(securityContext):
+                  allowPrivilegeEscalation: false
+                  capabilities:
+                    drop:
+                      - ALL
+---
+# Require Image Signatures
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: verify-image-signatures
+  annotations:
+    policies.kyverno.io/title: Verify Image Signatures
+    policies.kyverno.io/category: Supply Chain Security
+    policies.kyverno.io/severity: high
+spec:
+  validationFailureAction: Enforce
+  webhookTimeoutSeconds: 30
+  rules:
+    - name: verify-signature
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+      verifyImages:
+        - imageReferences:
+            - "gcr.io/your-project/*"
+            - "us-docker.pkg.dev/your-project/*"
+          attestors:
+            - entries:
+                - keyless:
+                    subject: "*@your-org.com"
+                    issuer: "https://accounts.google.com"
+                    rekor:
+                      url: https://rekor.sigstore.dev
+---
+# Auto-Inject Vault Annotations
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: inject-vault-annotations
+  annotations:
+    policies.kyverno.io/title: Inject Vault Annotations
+spec:
+  rules:
+    - name: add-vault-annotations
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+              annotations:
+                vault.hashicorp.com/role: "?*"
+      mutate:
+        patchStrategicMerge:
+          metadata:
+            annotations:
+              +(vault.hashicorp.com/agent-inject): "true"
+              +(vault.hashicorp.com/agent-inject-status): "update"
+              +(vault.hashicorp.com/tls-skip-verify): "false"
+              +(vault.hashicorp.com/ca-cert): "/vault/tls/ca.crt"
