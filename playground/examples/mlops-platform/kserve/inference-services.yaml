@@ -1,0 +1,303 @@
+# KServe InferenceService Definitions
+
+# XGBoost Model Deployment
+apiVersion: serving.kserve.io/v1beta1
+kind: InferenceService
+metadata:
+  name: xgboost-classifier
+  namespace: models
+  annotations:
+    sidecar.istio.io/inject: "true"
+    serving.kserve.io/enable-prometheus-scraping: "true"
+spec:
+  predictor:
+    minReplicas: 2
+    maxReplicas: 10
+    scaleTarget: 80
+    scaleMetric: concurrency
+    
+    xgboost:
+      storageUri: "s3://models/xgboost/v1"
+      runtimeVersion: "1.7.0"
+      resources:
+        requests:
+          cpu: "1"
+          memory: "2Gi"
+        limits:
+          cpu: "2"
+          memory: "4Gi"
+      env:
+        - name: STORAGE_URI
+          value: "s3://models/xgboost/v1"
+        
+    containerConcurrency: 10
+    timeout: 60
+    
+    logger:
+      mode: all
+      url: http://message-dumper.default/
+    
+    batcher:
+      maxBatchSize: 32
+      maxLatency: 500
+
+  transformer:
+    minReplicas: 1
+    maxReplicas: 5
+    containers:
+      - name: feature-transformer
+        image: gcr.io/project/feature-transformer:v1
+        resources:
+          requests:
+            cpu: "500m"
+            memory: "1Gi"
+          limits:
+            cpu: "1"
+            memory: "2Gi"
+        env:
+          - name: FEAST_FEATURE_SERVER
+            value: "http://feast-server:6566"
+---
+# PyTorch Model for Deep Learning
+apiVersion: serving.kserve.io/v1beta1
+kind: InferenceService
+metadata:
+  name: pytorch-recommender
+  namespace: models
+  annotations:
+    serving.kserve.io/enable-prometheus-scraping: "true"
+spec:
+  predictor:
+    minReplicas: 2
+    maxReplicas: 20
+    
+    pytorch:
+      storageUri: "s3://models/pytorch/recommender/v1"
+      runtimeVersion: "2.0.1"
+      protocolVersion: v2
+      resources:
+        requests:
+          cpu: "2"
+          memory: "4Gi"
+          nvidia.com/gpu: "1"
+        limits:
+          cpu: "4"
+          memory: "8Gi"
+          nvidia.com/gpu: "1"
+      
+    nodeSelector:
+      cloud.google.com/gke-accelerator: nvidia-tesla-t4
+    
+    tolerations:
+      - key: "nvidia.com/gpu"
+        operator: "Exists"
+        effect: "NoSchedule"
+---
+# Canary Deployment for A/B Testing
+apiVersion: serving.kserve.io/v1beta1
+kind: InferenceService
+metadata:
+  name: ab-testing-model
+  namespace: models
+  annotations:
+    serving.kserve.io/enable-prometheus-scraping: "true"
+spec:
+  predictor:
+    minReplicas: 2
+    canaryTrafficPercent: 20
+    
+    sklearn:
+      storageUri: "s3://models/sklearn/classifier/v2"
+      runtimeVersion: "1.3.0"
+      resources:
+        requests:
+          cpu: "500m"
+          memory: "1Gi"
+        limits:
+          cpu: "1"
+          memory: "2Gi"
+  
+  # Canary predictor (new version)
+  canaryPredictor:
+    sklearn:
+      storageUri: "s3://models/sklearn/classifier/v3"
+      runtimeVersion: "1.3.0"
+      resources:
+        requests:
+          cpu: "500m"
+          memory: "1Gi"
+        limits:
+          cpu: "1"
+          memory: "2Gi"
+---
+# Custom Model with Transformer
+apiVersion: serving.kserve.io/v1beta1
+kind: InferenceService
+metadata:
+  name: custom-nlp-model
+  namespace: models
+spec:
+  predictor:
+    minReplicas: 1
+    maxReplicas: 10
+    
+    containers:
+      - name: nlp-predictor
+        image: gcr.io/project/nlp-model:v1
+        ports:
+          - containerPort: 8080
+            protocol: TCP
+        env:
+          - name: MODEL_PATH
+            value: /mnt/models
+          - name: TOKENIZER_PATH
+            value: /mnt/tokenizer
+        resources:
+          requests:
+            cpu: "2"
+            memory: "4Gi"
+          limits:
+            cpu: "4"
+            memory: "8Gi"
+        volumeMounts:
+          - name: model-volume
+            mountPath: /mnt/models
+          - name: tokenizer-volume
+            mountPath: /mnt/tokenizer
+        readinessProbe:
+          httpGet:
+            path: /v1/models/nlp-model
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 60
+          periodSeconds: 15
+      
+    volumes:
+      - name: model-volume
+        persistentVolumeClaim:
+          claimName: nlp-model-pvc
+      - name: tokenizer-volume
+        configMap:
+          name: tokenizer-config
+
+  transformer:
+    minReplicas: 1
+    maxReplicas: 5
+    containers:
+      - name: text-preprocessor
+        image: gcr.io/project/text-preprocessor:v1
+        resources:
+          requests:
+            cpu: "500m"
+            memory: "512Mi"
+        env:
+          - name: MAX_SEQUENCE_LENGTH
+            value: "512"
+
+  explainer:
+    minReplicas: 1
+    alibi:
+      type: AnchorText
+      storageUri: "s3://models/explainers/nlp-anchor"
+      resources:
+        requests:
+          cpu: "500m"
+          memory: "1Gi"
+---
+# Serving Runtime for custom frameworks
+apiVersion: serving.kserve.io/v1alpha1
+kind: ServingRuntime
+metadata:
+  name: custom-sklearn-runtime
+  namespace: models
+spec:
+  annotations:
+    prometheus.kserve.io/scrape: "true"
+    prometheus.kserve.io/port: "8080"
+    prometheus.kserve.io/path: "/metrics"
+  
+  supportedModelFormats:
+    - name: sklearn
+      version: "1"
+      autoSelect: true
+  
+  protocolVersions:
+    - v2
+    - grpc-v2
+  
+  containers:
+    - name: kserve-container
+      image: gcr.io/project/custom-sklearn-server:v1
+      args:
+        - --model_name={{.Name}}
+        - --model_dir=/mnt/models
+        - --http_port=8080
+        - --grpc_port=8081
+      resources:
+        requests:
+          cpu: "1"
+          memory: "2Gi"
+        limits:
+          cpu: "2"
+          memory: "4Gi"
+      env:
+        - name: MLSERVER_MODEL_IMPLEMENTATION
+          value: mlserver_sklearn.SKLearnModel
+      ports:
+        - containerPort: 8080
+          protocol: TCP
+        - containerPort: 8081
+          protocol: TCP
+---
+# Model Monitoring with Evidently
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: evidently-config
+  namespace: models
+data:
+  config.yaml: |
+    service:
+      host: 0.0.0.0
+      port: 8000
+    
+    monitors:
+      - type: data_drift
+        reference_data: s3://data/reference/data.parquet
+        thresholds:
+          dataset_drift: 0.3
+          feature_drift: 0.1
+        
+      - type: prediction_drift
+        reference_data: s3://data/reference/predictions.parquet
+        thresholds:
+          prediction_drift: 0.2
+        
+      - type: data_quality
+        checks:
+          - missing_values
+          - new_categories
+          - out_of_range
+        
+      - type: model_performance
+        target_column: actual
+        prediction_column: prediction
+        metrics:
+          - accuracy
+          - f1
+          - precision
+          - recall
+    
+    alerting:
+      slack_webhook: ${SLACK_WEBHOOK}
+      pagerduty_key: ${PAGERDUTY_KEY}
+      
+    storage:
+      type: s3
+      bucket: monitoring-reports
+      prefix: evidently/
