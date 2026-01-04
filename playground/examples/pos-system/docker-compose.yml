@@ -1,0 +1,99 @@
+version: '3.8'
+
+services:
+  # ============================================
+  # API Server
+  # ============================================
+  api:
+    build: ./api
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgres://pos:password@postgres:5432/pos
+      - REDIS_URL=redis://redis:6379
+      - JWT_SECRET=super-secret-jwt-key
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    networks:
+      - pos
+
+  # ============================================
+  # Database
+  # ============================================
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: pos
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: pos
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./database/init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pos"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - pos
+
+  # ============================================
+  # Cache & Queue
+  # ============================================
+  redis:
+    image: redis:alpine
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    networks:
+      - pos
+
+  # ============================================
+  # Receipt Storage
+  # ============================================
+  minio:
+    image: minio/minio
+    command: server /data --console-address ":9001"
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    volumes:
+      - minio_data:/data
+    networks:
+      - pos
+
+  # ============================================
+  # Monitoring
+  # ============================================
+  prometheus:
+    image: prom/prometheus:latest
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+    networks:
+      - pos
+
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3002:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    networks:
+      - pos
+
+networks:
+  pos:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  redis_data:
+  minio_data:

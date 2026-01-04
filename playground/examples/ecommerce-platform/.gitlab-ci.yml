@@ -1,0 +1,172 @@
+# E-Commerce CI/CD Pipeline
+
+stages:
+  - validate
+  - build
+  - test
+  - security
+  - deploy
+
+variables:
+  DOCKER_REGISTRY: registry.gitlab.com
+  IMAGE_PREFIX: $CI_PROJECT_PATH
+
+# ============================================
+# VALIDATE
+# ============================================
+lint:
+  stage: validate
+  image: node:18
+  script:
+    - for dir in services/*/; do
+        echo "Linting $dir";
+        cd "$dir";
+        npm ci;
+        npm run lint || true;
+        cd ../..;
+      done
+  rules:
+    - if: $CI_MERGE_REQUEST_IID
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+# ============================================
+# BUILD
+# ============================================
+.build-template:
+  stage: build
+  image: docker:24
+  services:
+    - docker:24-dind
+  variables:
+    DOCKER_TLS_CERTDIR: "/certs"
+  before_script:
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+  script:
+    - docker build -t $IMAGE_PREFIX/$SERVICE:$CI_COMMIT_SHA ./services/$SERVICE
+    - docker push $IMAGE_PREFIX/$SERVICE:$CI_COMMIT_SHA
+  rules:
+    - if: $CI_COMMIT_BRANCH
+
+build-product-service:
+  extends: .build-template
+  variables:
+    SERVICE: product-service
+
+build-order-service:
+  extends: .build-template
+  variables:
+    SERVICE: order-service
+
+build-user-service:
+  extends: .build-template
+  variables:
+    SERVICE: user-service
+
+build-payment-service:
+  extends: .build-template
+  variables:
+    SERVICE: payment-service
+
+# ============================================
+# TEST
+# ============================================
+unit-tests:
+  stage: test
+  image: node:18
+  services:
+    - postgres:15
+    - redis:alpine
+  variables:
+    POSTGRES_DB: test
+    POSTGRES_USER: test
+    POSTGRES_PASSWORD: test
+    DATABASE_URL: postgres://test:test@postgres:5432/test
+    REDIS_URL: redis://redis:6379
+  script:
+    - for dir in services/*/; do
+        echo "Testing $dir";
+        cd "$dir";
+        npm ci;
+        npm test || true;
+        cd ../..;
+      done
+  needs:
+    - build-product-service
+    - build-order-service
+
+integration-tests:
+  stage: test
+  image: docker:24
+  services:
+    - docker:24-dind
+  script:
+    - docker compose -f docker-compose.test.yml up -d
+    - sleep 60
+    - docker compose -f docker-compose.test.yml run tests
+    - docker compose -f docker-compose.test.yml down
+
+# ============================================
+# SECURITY
+# ============================================
+container-scan:
+  stage: security
+  image:
+    name: aquasec/trivy:latest
+    entrypoint: [""]
+  script:
+    - trivy image --exit-code 0 --severity HIGH,CRITICAL $IMAGE_PREFIX/product-service:$CI_COMMIT_SHA
+    - trivy image --exit-code 0 --severity HIGH,CRITICAL $IMAGE_PREFIX/order-service:$CI_COMMIT_SHA
+  allow_failure: true
+  needs:
+    - build-product-service
+    - build-order-service
+
+dependency-check:
+  stage: security
+  image: node:18
+  script:
+    - for dir in services/*/; do
+        cd "$dir";
+        npm audit --audit-level=high || true;
+        cd ../..;
+      done
+  allow_failure: true
+
+# ============================================
+# DEPLOY
+# ============================================
+deploy-staging:
+  stage: deploy
+  image: bitnami/kubectl:latest
+  environment:
+    name: staging
+    url: https://staging.ecommerce.example.com
+  script:
+    - kubectl set image deployment/product-service product=$IMAGE_PREFIX/product-service:$CI_COMMIT_SHA -n staging
+    - kubectl set image deployment/order-service order=$IMAGE_PREFIX/order-service:$CI_COMMIT_SHA -n staging
+    - kubectl rollout status deployment/product-service -n staging --timeout=5m
+    - kubectl rollout status deployment/order-service -n staging --timeout=5m
+  needs:
+    - unit-tests
+    - integration-tests
+  rules:
+    - if: $CI_COMMIT_BRANCH == "develop"
+
+deploy-production:
+  stage: deploy
+  image: bitnami/kubectl:latest
+  environment:
+    name: production
+    url: https://ecommerce.example.com
+  script:
+    - kubectl set image deployment/product-service product=$IMAGE_PREFIX/product-service:$CI_COMMIT_SHA -n production
+    - kubectl set image deployment/order-service order=$IMAGE_PREFIX/order-service:$CI_COMMIT_SHA -n production
+    - kubectl rollout status deployment/product-service -n production --timeout=10m
+    - kubectl rollout status deployment/order-service -n production --timeout=10m
+  needs:
+    - unit-tests
+    - integration-tests
+    - container-scan
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+  when: manual
