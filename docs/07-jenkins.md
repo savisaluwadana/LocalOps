@@ -1,405 +1,161 @@
-# Jenkins In-Depth Theory
+# Jenkins Complete Guide
 
-## CI/CD Fundamentals
+## Table of Contents
 
-### What is Continuous Integration?
-
-**Continuous Integration (CI)** means developers frequently merge code changes into a shared repository. Each merge triggers an automated build and test.
-
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                     CONTINUOUS INTEGRATION                                   │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                              │
-│   Developer    Developer    Developer                                        │
-│      │            │            │                                             │
-│      │   commit   │   commit   │   commit                                    │
-│      ▼            ▼            ▼                                             │
-│   ┌──────────────────────────────────┐                                       │
-│   │         Git Repository           │                                       │
-│   └──────────────┬───────────────────┘                                       │
-│                  │ webhook/poll                                              │
-│                  ▼                                                           │
-│   ┌──────────────────────────────────┐                                       │
-│   │         Jenkins Server           │                                       │
-│   │   ┌────────────────────────┐     │                                       │
-│   │   │    Pipeline Stages     │     │                                       │
-│   │   │                        │     │                                       │
-│   │   │  1. Checkout Code      │     │                                       │
-│   │   │  2. Install Deps       │     │                                       │
-│   │   │  3. Run Linting        │     │                                       │
-│   │   │  4. Run Tests          │     │                                       │
-│   │   │  5. Build Artifact     │     │                                       │
-│   │   │  6. Publish Reports    │     │                                       │
-│   │   │                        │     │                                       │
-│   │   └────────────────────────┘     │                                       │
-│   └──────────────────────────────────┘                                       │
-│                  │                                                           │
-│                  ▼                                                           │
-│        Feedback (pass/fail)                                                  │
-│                                                                              │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
-
-### What is Continuous Delivery/Deployment?
-
-**Continuous Delivery (CD)**: Code is always in a deployable state; deployment requires manual approval.
-
-**Continuous Deployment**: Every change that passes tests is automatically deployed to production.
+1. [Jenkins Fundamentals](#jenkins-fundamentals)
+2. [Architecture](#architecture)
+3. [Pipeline Basics](#pipeline-basics)
+4. [Declarative vs Scripted](#declarative-vs-scripted)
+5. [Pipeline Syntax](#pipeline-syntax)
+6. [Shared Libraries](#shared-libraries)
+7. [Agents and Executors](#agents-and-executors)
+8. [Integration Patterns](#integration-patterns)
+9. [Best Practices](#best-practices)
 
 ---
 
-## Jenkins Architecture
+## Jenkins Fundamentals
 
-### Master-Agent Architecture
+### What is Jenkins?
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                      JENKINS ARCHITECTURE                                    │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                              │
-│   ┌─────────────────────────────────────────────────────────────────────┐   │
-│   │                      JENKINS CONTROLLER (Master)                     │   │
-│   │                                                                      │   │
-│   │  ┌──────────────┐  ┌──────────────┐  ┌──────────────────────────┐  │   │
-│   │  │     UI       │  │   Scheduler  │  │    Build Queue           │  │   │
-│   │  │  (Web App)   │  │              │  │                          │  │   │
-│   │  └──────────────┘  └──────────────┘  └──────────────────────────┘  │   │
-│   │                                                                      │   │
-│   │  ┌──────────────┐  ┌──────────────┐  ┌──────────────────────────┐  │   │
-│   │  │  Credentials │  │    Plugins   │  │   Configuration          │  │   │
-│   │  │    Store     │  │   Manager    │  │   (jobs, pipelines)      │  │   │
-│   │  └──────────────┘  └──────────────┘  └──────────────────────────┘  │   │
-│   │                                                                      │   │
-│   └───────────────────────────────┬─────────────────────────────────────┘   │
-│                                   │ JNLP/SSH                                │
-│           ┌───────────────────────┼───────────────────────┐                 │
-│           │                       │                       │                 │
-│           ▼                       ▼                       ▼                 │
-│   ┌───────────────┐       ┌───────────────┐       ┌───────────────┐        │
-│   │   Agent 1     │       │   Agent 2     │       │   Agent 3     │        │
-│   │  (Linux)      │       │  (Docker)     │       │  (macOS)      │        │
-│   │               │       │               │       │               │        │
-│   │ label: linux  │       │ label: docker │       │ label: macos  │        │
-│   │ executors: 4  │       │ executors: 2  │       │ executors: 2  │        │
-│   └───────────────┘       └───────────────┘       └───────────────┘        │
-│                                                                              │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
+**Jenkins** is an open-source automation server that helps automate building, testing, and deploying software. It's the most widely used CI/CD tool.
 
-### Key Components
+### Key Concepts
 
-| Component | Purpose |
-|-----------|---------|
-| **Controller** | Schedules jobs, manages UI, stores configuration |
-| **Agent** | Executes builds (can be VMs, containers, bare metal) |
-| **Executor** | A slot that can run one build at a time |
-| **Workspace** | Directory where build runs on an agent |
-| **Pipeline** | The definition of your CI/CD workflow |
+| Concept | Description |
+|---------|-------------|
+| **Job** | A runnable task (build, test, deploy) |
+| **Build** | One execution of a job |
+| **Pipeline** | A series of connected jobs |
+| **Agent** | A machine that runs builds |
+| **Executor** | A slot for running builds |
+| **Workspace** | Directory where build runs |
 
 ---
 
-## Pipeline as Code
+## Architecture
 
-### Declarative Pipeline Syntax
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                       JENKINS ARCHITECTURE                               │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                          │
+│   ┌────────────────────────────────────────────────────────────────┐    │
+│   │                     JENKINS CONTROLLER                          │    │
+│   │                                                                  │    │
+│   │  • Schedules builds                                             │    │
+│   │  • Distributes work to agents                                   │    │
+│   │  • Monitors agents                                              │    │
+│   │  • Records build results                                        │    │
+│   │  • Serves UI                                                    │    │
+│   └────────────────────────────────────────────────────────────────┘    │
+│          │              │               │                                │
+│          ▼              ▼               ▼                                │
+│   ┌──────────────┐ ┌──────────────┐ ┌──────────────┐                   │
+│   │   Agent 1    │ │   Agent 2    │ │   Agent 3    │                   │
+│   │  (Linux)     │ │  (Windows)   │ │  (Docker)    │                   │
+│   │              │ │              │ │              │                   │
+│   │ Executor 1   │ │ Executor 1   │ │ Executor 1   │                   │
+│   │ Executor 2   │ │ Executor 2   │ │ Executor 2   │                   │
+│   └──────────────┘ └──────────────┘ └──────────────┘                   │
+│                                                                          │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Pipeline Basics
+
+### Jenkinsfile
+
+A Jenkinsfile defines your pipeline as code, stored alongside your application.
 
 ```groovy
+// Jenkinsfile
 pipeline {
-    // Where to run
     agent any
-
-    // Pipeline options
-    options {
-        timeout(time: 1, unit: 'HOURS')
-        retry(2)
-        timestamps()
-        buildDiscarder(logRotator(numToKeepStr: '10'))
-        disableConcurrentBuilds()
-    }
-
-    // Environment variables
-    environment {
-        APP_NAME = 'myapp'
-        DOCKER_REGISTRY = 'docker.io/myuser'
-        // From credentials store
-        DOCKER_CREDS = credentials('docker-hub-creds')
-        DB_PASSWORD = credentials('database-password')
-    }
-
-    // Build parameters
-    parameters {
-        string(name: 'BRANCH', defaultValue: 'main', description: 'Branch to build')
-        choice(name: 'ENVIRONMENT', choices: ['dev', 'staging', 'prod'], description: 'Target environment')
-        booleanParam(name: 'RUN_TESTS', defaultValue: true, description: 'Run test suite')
-        password(name: 'DEPLOY_KEY', description: 'Deployment API key')
-    }
-
-    // Define stages
+    
     stages {
-        stage('Checkout') {
-            steps {
-                checkout([
-                    $class: 'GitSCM',
-                    branches: [[name: "*/${params.BRANCH}"]],
-                    userRemoteConfigs: [[url: 'https://github.com/user/repo.git']]
-                ])
-                script {
-                    env.GIT_COMMIT_SHORT = sh(script: 'git rev-parse --short HEAD', returnStdout: true).trim()
-                }
-            }
-        }
-
         stage('Build') {
             steps {
                 sh 'npm install'
                 sh 'npm run build'
             }
         }
-
+        
         stage('Test') {
-            when {
-                expression { params.RUN_TESTS }
-            }
-            parallel {
-                stage('Unit Tests') {
-                    steps {
-                        sh 'npm run test:unit'
-                    }
-                    post {
-                        always {
-                            junit 'test-results/unit/*.xml'
-                        }
-                    }
-                }
-                stage('Integration Tests') {
-                    steps {
-                        sh 'npm run test:integration'
-                    }
-                }
-                stage('E2E Tests') {
-                    agent {
-                        docker {
-                            image 'cypress/included:latest'
-                        }
-                    }
-                    steps {
-                        sh 'cypress run'
-                    }
-                }
+            steps {
+                sh 'npm test'
             }
         }
-
-        stage('Build Docker Image') {
+        
+        stage('Deploy') {
             steps {
-                script {
-                    def image = docker.build("${DOCKER_REGISTRY}/${APP_NAME}:${env.BUILD_NUMBER}")
-                    docker.withRegistry('https://docker.io', 'docker-hub-creds') {
-                        image.push()
-                        image.push('latest')
-                    }
-                }
-            }
-        }
-
-        stage('Deploy to Staging') {
-            when {
-                branch 'develop'
-            }
-            steps {
-                sh """
-                    kubectl set image deployment/${APP_NAME} \
-                        ${APP_NAME}=${DOCKER_REGISTRY}/${APP_NAME}:${env.BUILD_NUMBER} \
-                        -n staging
-                """
-            }
-        }
-
-        stage('Deploy to Production') {
-            when {
-                branch 'main'
-            }
-            steps {
-                input message: 'Deploy to production?', ok: 'Deploy'
-                sh """
-                    kubectl set image deployment/${APP_NAME} \
-                        ${APP_NAME}=${DOCKER_REGISTRY}/${APP_NAME}:${env.BUILD_NUMBER} \
-                        -n production
-                """
+                sh './deploy.sh'
             }
         }
     }
+}
+```
 
-    // Post-build actions
-    post {
-        always {
-            cleanWs()
-        }
-        success {
-            slackSend(
-                channel: '#deployments',
-                color: 'good',
-                message: "✅ Build #${env.BUILD_NUMBER} succeeded - ${env.JOB_NAME}"
-            )
-        }
-        failure {
-            slackSend(
-                channel: '#deployments',
-                color: 'danger',
-                message: "❌ Build #${env.BUILD_NUMBER} failed - ${env.JOB_NAME}\n${env.BUILD_URL}"
-            )
+### Pipeline Components
+
+```
+pipeline {
+    agent { ... }          // WHERE to run
+    
+    environment { ... }    // Environment variables
+    
+    stages {               // WHAT to do
+        stage('Name') {
+            steps { ... }
         }
     }
+    
+    post { ... }           // Actions after pipeline
 }
 ```
 
 ---
 
-## Advanced Pipeline Patterns
+## Declarative vs Scripted
 
-### Shared Libraries
+| Aspect | Declarative | Scripted |
+|--------|-------------|----------|
+| Syntax | Structured, limited | Full Groovy |
+| Learning curve | Easier | Steeper |
+| Error messages | Better | More cryptic |
+| Flexibility | Less | More |
+| Use case | Most pipelines | Complex logic |
 
-Create reusable pipeline code:
-
-**vars/deployApp.groovy:**
-```groovy
-def call(Map config) {
-    pipeline {
-        agent any
-        
-        stages {
-            stage('Deploy') {
-                steps {
-                    script {
-                        sh "kubectl set image deployment/${config.appName} ${config.container}=${config.image}"
-                    }
-                }
-            }
-            
-            stage('Verify') {
-                steps {
-                    sh "kubectl rollout status deployment/${config.appName} --timeout=300s"
-                }
-            }
-        }
-    }
-}
-```
-
-**Using shared library:**
-```groovy
-@Library('my-shared-library') _
-
-deployApp(
-    appName: 'frontend',
-    container: 'nginx',
-    image: 'myapp/frontend:v1.2.3'
-)
-```
-
-### Matrix Builds
-
-Test across multiple configurations:
-
-```groovy
-pipeline {
-    agent none
-    
-    stages {
-        stage('Test Matrix') {
-            matrix {
-                axes {
-                    axis {
-                        name 'PYTHON_VERSION'
-                        values '3.9', '3.10', '3.11', '3.12'
-                    }
-                    axis {
-                        name 'OS'
-                        values 'ubuntu-latest', 'macos-latest'
-                    }
-                }
-                excludes {
-                    exclude {
-                        axis {
-                            name 'PYTHON_VERSION'
-                            values '3.9'
-                        }
-                        axis {
-                            name 'OS'
-                            values 'macos-latest'
-                        }
-                    }
-                }
-                stages {
-                    stage('Setup') {
-                        agent {
-                            label "${OS}"
-                        }
-                        steps {
-                            sh "python${PYTHON_VERSION} --version"
-                        }
-                    }
-                    stage('Test') {
-                        steps {
-                            sh "tox -e py${PYTHON_VERSION.replace('.', '')}"
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-```
-
-### Blue-Green Deployment
+### Declarative Example
 
 ```groovy
 pipeline {
     agent any
-    
-    environment {
-        ACTIVE_COLOR = sh(script: 'kubectl get svc myapp -o jsonpath={.spec.selector.color}', returnStdout: true).trim()
-        NEW_COLOR = "${ACTIVE_COLOR == 'blue' ? 'green' : 'blue'}"
-    }
-    
     stages {
-        stage('Deploy New Version') {
+        stage('Build') {
             steps {
-                sh """
-                    kubectl set image deployment/myapp-${NEW_COLOR} \
-                        myapp=${DOCKER_REGISTRY}/myapp:${BUILD_NUMBER}
-                    kubectl rollout status deployment/myapp-${NEW_COLOR}
-                """
-            }
-        }
-        
-        stage('Smoke Test') {
-            steps {
-                sh "curl -f http://myapp-${NEW_COLOR}.internal/health"
-            }
-        }
-        
-        stage('Switch Traffic') {
-            steps {
-                input message: "Switch traffic to ${NEW_COLOR}?"
-                sh """
-                    kubectl patch svc myapp -p '{"spec":{"selector":{"color":"${NEW_COLOR}"}}}'
-                """
-            }
-        }
-        
-        stage('Cleanup Old Version') {
-            steps {
-                sh "kubectl scale deployment/myapp-${ACTIVE_COLOR} --replicas=0"
+                sh 'make build'
             }
         }
     }
+}
+```
+
+### Scripted Example
+
+```groovy
+node {
+    stage('Build') {
+        sh 'make build'
+    }
     
-    post {
-        failure {
-            // Rollback on failure
-            sh """
-                kubectl patch svc myapp -p '{"spec":{"selector":{"color":"${ACTIVE_COLOR}"}}}'
-            """
+    // Full Groovy power
+    def items = ['a', 'b', 'c']
+    items.each { item ->
+        stage("Process ${item}") {
+            sh "process ${item}"
         }
     }
 }
@@ -407,247 +163,365 @@ pipeline {
 
 ---
 
-## Jenkins with Docker
+## Pipeline Syntax
 
-### Docker as Build Environment
+### Agents
+
+```groovy
+// Any available agent
+agent any
+
+// Specific label
+agent { label 'linux' }
+
+// Docker container
+agent {
+    docker {
+        image 'node:18'
+        args '-v /tmp:/tmp'
+    }
+}
+
+// Kubernetes pod
+agent {
+    kubernetes {
+        yaml '''
+        apiVersion: v1
+        kind: Pod
+        spec:
+          containers:
+          - name: maven
+            image: maven:3.8-jdk-11
+            command: ['cat']
+            tty: true
+        '''
+    }
+}
+
+// No agent at top level
+agent none
+```
+
+### Stages and Steps
+
+```groovy
+stages {
+    stage('Build') {
+        steps {
+            // Shell commands
+            sh 'npm install'
+            sh '''
+                npm run build
+                npm run lint
+            '''
+            
+            // Change directory
+            dir('subdir') {
+                sh 'make'
+            }
+            
+            // Echo
+            echo 'Building...'
+        }
+    }
+    
+    stage('Parallel Tests') {
+        parallel {
+            stage('Unit Tests') {
+                steps {
+                    sh 'npm run test:unit'
+                }
+            }
+            stage('Integration Tests') {
+                steps {
+                    sh 'npm run test:integration'
+                }
+            }
+        }
+    }
+}
+```
+
+### Environment Variables
+
+```groovy
+pipeline {
+    environment {
+        // Global
+        APP_NAME = 'my-app'
+        VERSION = sh(script: 'cat VERSION', returnStdout: true).trim()
+    }
+    
+    stages {
+        stage('Build') {
+            environment {
+                // Stage-specific
+                BUILD_ENV = 'production'
+            }
+            steps {
+                sh 'echo $APP_NAME $VERSION'
+            }
+        }
+    }
+}
+```
+
+### Credentials
+
+```groovy
+pipeline {
+    environment {
+        // Username/password
+        CREDS = credentials('my-creds-id')
+        // Gives: CREDS_USR and CREDS_PSW
+        
+        // Secret text
+        API_KEY = credentials('api-key-id')
+    }
+    
+    stages {
+        stage('Deploy') {
+            steps {
+                sh 'docker login -u $CREDS_USR -p $CREDS_PSW'
+                
+                // Or in a withCredentials block
+                withCredentials([usernamePassword(
+                    credentialsId: 'my-creds',
+                    usernameVariable: 'USER',
+                    passwordVariable: 'PASS'
+                )]) {
+                    sh 'deploy --user $USER --pass $PASS'
+                }
+            }
+        }
+    }
+}
+```
+
+### Conditionals
+
+```groovy
+stage('Deploy to Prod') {
+    when {
+        branch 'main'
+    }
+    steps {
+        sh './deploy-prod.sh'
+    }
+}
+
+stage('Deploy Feature') {
+    when {
+        branch pattern: 'feature/*', comparator: 'GLOB'
+    }
+    steps {
+        sh './deploy-feature.sh'
+    }
+}
+
+stage('Manual Approval') {
+    when {
+        expression { params.DEPLOY_PROD == true }
+    }
+    steps {
+        input message: 'Deploy to production?'
+    }
+}
+```
+
+### Post Actions
+
+```groovy
+pipeline {
+    stages { ... }
+    
+    post {
+        always {
+            // Always run (cleanup)
+            cleanWs()
+        }
+        success {
+            slackSend message: 'Build succeeded!'
+        }
+        failure {
+            slackSend message: 'Build failed!'
+        }
+        unstable {
+            // Test failures
+        }
+        changed {
+            // Status changed from last build
+        }
+    }
+}
+```
+
+---
+
+## Shared Libraries
+
+Reusable code across pipelines.
+
+### Library Structure
+
+```
+(root)
+├── vars/
+│   ├── buildApp.groovy      # Global variables/functions
+│   └── deployApp.groovy
+├── src/
+│   └── org/company/         # Groovy classes
+│       └── Utils.groovy
+└── resources/               # Non-Groovy files
+    └── templates/
+```
+
+### Creating a Step
+
+```groovy
+// vars/buildApp.groovy
+def call(Map config = [:]) {
+    def appName = config.name ?: 'default-app'
+    def buildType = config.type ?: 'npm'
+    
+    pipeline {
+        agent any
+        
+        stages {
+            stage('Build') {
+                steps {
+                    script {
+                        if (buildType == 'npm') {
+                            sh 'npm install && npm run build'
+                        } else if (buildType == 'maven') {
+                            sh 'mvn clean package'
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+```
+
+### Using the Library
+
+```groovy
+@Library('my-shared-library') _
+
+buildApp(name: 'my-app', type: 'npm')
+```
+
+---
+
+## Agents and Executors
+
+### Agent Configuration
+
+```groovy
+// In Jenkins configuration
+// Manage Jenkins → Nodes
+
+// Dynamic agents with Kubernetes
+agent {
+    kubernetes {
+        yaml '''
+        spec:
+          containers:
+          - name: node
+            image: node:18
+            resources:
+              limits:
+                memory: "2Gi"
+                cpu: "1"
+        '''
+        defaultContainer 'node'
+    }
+}
+```
+
+### Best Practices
+
+| Practice | Reason |
+|----------|--------|
+| Use ephemeral agents | Clean environment each build |
+| Right-size resources | Don't waste or starve |
+| Label agents | Match jobs to capabilities |
+| Limit executors on controller | Controller for coordination only |
+
+---
+
+## Integration Patterns
+
+### Docker
 
 ```groovy
 pipeline {
     agent {
         docker {
-            image 'node:18-alpine'
-            args '-v $HOME/.npm:/root/.npm'  // Cache npm
+            image 'node:18'
         }
     }
     
     stages {
-        stage('Build') {
-            steps {
-                sh 'npm ci'
-                sh 'npm run build'
-            }
-        }
-    }
-}
-```
-
-### Build Docker Images
-
-```groovy
-pipeline {
-    agent any
-    
-    stages {
-        stage('Build Image') {
+        stage('Build Docker Image') {
             steps {
                 script {
-                    // Build image
-                    def customImage = docker.build("myapp:${env.BUILD_NUMBER}")
-                    
-                    // Run tests inside container
-                    customImage.inside {
-                        sh 'pytest tests/'
-                    }
-                    
-                    // Push to registry
-                    docker.withRegistry('https://registry.example.com', 'registry-creds') {
-                        customImage.push()
-                        customImage.push('latest')
-                    }
+                    docker.build("my-app:${BUILD_NUMBER}")
                 }
-            }
-        }
-    }
-}
-```
-
-### Docker Compose in Pipeline
-
-```groovy
-pipeline {
-    agent any
-    
-    stages {
-        stage('Integration Test') {
-            steps {
-                sh 'docker compose -f docker-compose.test.yml up -d'
-                sh 'sleep 10'  // Wait for services
-                sh 'npm run test:integration'
-            }
-            post {
-                always {
-                    sh 'docker compose -f docker-compose.test.yml down -v'
-                }
-            }
-        }
-    }
-}
-```
-
----
-
-## Credentials Management
-
-### Types of Credentials
-
-```groovy
-pipeline {
-    environment {
-        // Username and password
-        GIT_CREDS = credentials('git-credentials')
-        // Creates: GIT_CREDS_USR, GIT_CREDS_PSW
-        
-        // Secret text
-        API_KEY = credentials('api-key')
-        
-        // Secret file
-        KUBECONFIG = credentials('kubeconfig-file')
-    }
-    
-    stages {
-        stage('Use Credentials') {
-            steps {
-                // Username/password
-                sh 'git clone https://${GIT_CREDS_USR}:${GIT_CREDS_PSW}@github.com/repo.git'
-                
-                // SSH key
-                withCredentials([sshUserPrivateKey(
-                    credentialsId: 'ssh-key',
-                    keyFileVariable: 'SSH_KEY',
-                    usernameVariable: 'SSH_USER'
-                )]) {
-                    sh 'ssh -i $SSH_KEY $SSH_USER@server "deploy.sh"'
-                }
-                
-                // File credential
-                sh 'kubectl --kubeconfig=$KUBECONFIG get pods'
-            }
-        }
-    }
-}
-```
-
----
-
-## Complete Example: Full CI/CD Pipeline
-
-```groovy
-pipeline {
-    agent any
-    
-    options {
-        buildDiscarder(logRotator(numToKeepStr: '20'))
-        timestamps()
-        timeout(time: 30, unit: 'MINUTES')
-    }
-    
-    environment {
-        DOCKER_REGISTRY = 'docker.io/myuser'
-        APP_NAME = 'mywebapp'
-        DOCKER_CREDS = credentials('docker-hub')
-        KUBE_CONFIG = credentials('kubeconfig')
-    }
-    
-    stages {
-        stage('Prepare') {
-            steps {
-                checkout scm
-                script {
-                    env.VERSION = sh(script: 'cat VERSION', returnStdout: true).trim()
-                    env.IMAGE_TAG = "${env.VERSION}-${env.BUILD_NUMBER}"
-                    currentBuild.displayName = "#${BUILD_NUMBER} - ${env.VERSION}"
-                }
-            }
-        }
-        
-        stage('Quality Gates') {
-            parallel {
-                stage('Lint') {
-                    agent { docker { image 'node:18' } }
-                    steps {
-                        sh 'npm ci && npm run lint'
-                    }
-                }
-                stage('Security Scan') {
-                    steps {
-                        sh 'trivy fs --exit-code 1 --severity HIGH,CRITICAL .'
-                    }
-                }
-                stage('Unit Tests') {
-                    agent { docker { image 'node:18' } }
-                    steps {
-                        sh 'npm ci && npm test -- --coverage'
-                    }
-                    post {
-                        always {
-                            publishHTML(target: [
-                                allowMissing: false,
-                                alwaysLinkToLastBuild: true,
-                                keepAll: true,
-                                reportDir: 'coverage',
-                                reportFiles: 'lcov-report/index.html',
-                                reportName: 'Coverage Report'
-                            ])
-                        }
-                    }
-                }
-            }
-        }
-        
-        stage('Build') {
-            steps {
-                sh """
-                    docker build -t ${DOCKER_REGISTRY}/${APP_NAME}:${IMAGE_TAG} .
-                    docker tag ${DOCKER_REGISTRY}/${APP_NAME}:${IMAGE_TAG} ${DOCKER_REGISTRY}/${APP_NAME}:latest
-                """
             }
         }
         
         stage('Push') {
             steps {
-                sh """
-                    echo ${DOCKER_CREDS_PSW} | docker login -u ${DOCKER_CREDS_USR} --password-stdin
-                    docker push ${DOCKER_REGISTRY}/${APP_NAME}:${IMAGE_TAG}
-                    docker push ${DOCKER_REGISTRY}/${APP_NAME}:latest
-                """
-            }
-        }
-        
-        stage('Deploy Staging') {
-            steps {
-                sh """
-                    export KUBECONFIG=${KUBE_CONFIG}
-                    kubectl set image deployment/${APP_NAME} ${APP_NAME}=${DOCKER_REGISTRY}/${APP_NAME}:${IMAGE_TAG} -n staging
-                    kubectl rollout status deployment/${APP_NAME} -n staging --timeout=120s
-                """
-            }
-        }
-        
-        stage('Deploy Production') {
-            when { branch 'main' }
-            steps {
-                timeout(time: 10, unit: 'MINUTES') {
-                    input message: 'Deploy to Production?', submitter: 'admin,deploy-team'
+                script {
+                    docker.withRegistry('https://registry.example.com', 'registry-creds') {
+                        docker.image("my-app:${BUILD_NUMBER}").push()
+                    }
                 }
-                sh """
-                    export KUBECONFIG=${KUBE_CONFIG}
-                    kubectl set image deployment/${APP_NAME} ${APP_NAME}=${DOCKER_REGISTRY}/${APP_NAME}:${IMAGE_TAG} -n production
-                    kubectl rollout status deployment/${APP_NAME} -n production --timeout=120s
-                """
             }
-        }
-    }
-    
-    post {
-        success {
-            slackSend(color: '#00FF00', message: "✅ SUCCESS: ${env.JOB_NAME} #${env.BUILD_NUMBER}")
-        }
-        failure {
-            slackSend(color: '#FF0000', message: "❌ FAILURE: ${env.JOB_NAME} #${env.BUILD_NUMBER}\n${env.BUILD_URL}")
-        }
-        always {
-            cleanWs()
         }
     }
 }
 ```
+
+### Kubernetes Deployment
+
+```groovy
+stage('Deploy to K8s') {
+    steps {
+        withKubeConfig([credentialsId: 'kubeconfig']) {
+            sh 'kubectl apply -f k8s/'
+            sh 'kubectl rollout status deployment/my-app'
+        }
+    }
+}
+```
+
+---
+
+## Best Practices
+
+### Pipeline Design
+
+1. **Keep Jenkinsfile in repo** - Version controlled with code
+2. **Use declarative syntax** - Easier to read and maintain
+3. **Fail fast** - Run quick validations first
+4. **Parallelize** - Run independent stages concurrently
+5. **Use shared libraries** - DRY across pipelines
+
+### Security
+
+1. **Never hardcode secrets** - Use credentials plugin
+2. **Limit access** - Role-based access control
+3. **Audit** - Track who ran what
+4. **Update regularly** - Security patches
+
+### Maintenance
+
+1. **Clean workspaces** - Prevent disk issues
+2. **Archive artifacts selectively** - Keep what matters
+3. **Set build retention** - Don't keep forever
+4. **Monitor queue time** - Add agents if needed
+
+This guide covers Jenkins from fundamentals to advanced patterns for building robust CI/CD pipelines.

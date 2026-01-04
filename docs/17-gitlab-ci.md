@@ -1,356 +1,365 @@
-# GitLab CI/CD In-Depth Guide
+# GitLab CI/CD Complete Guide
 
-## What is GitLab CI/CD?
+## Table of Contents
 
-GitLab CI/CD is an integrated DevOps platform for building, testing, and deploying code.
-
-## Core Concepts
-
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                          GITLAB CI/CD ARCHITECTURE                           │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                              │
-│  Git Push / Merge Request                                                    │
-│       │                                                                      │
-│       ▼                                                                      │
-│  ┌─────────────────────────────────────────────────────────────────────┐    │
-│  │                    PIPELINE (.gitlab-ci.yml)                         │    │
-│  │                                                                      │    │
-│  │  ┌────────────┐  ┌────────────┐  ┌────────────┐  ┌────────────┐    │    │
-│  │  │  STAGE 1   │→ │  STAGE 2   │→ │  STAGE 3   │→ │  STAGE 4   │    │    │
-│  │  │   build    │  │    test    │  │   deploy   │  │  cleanup   │    │    │
-│  │  └─────┬──────┘  └─────┬──────┘  └─────┬──────┘  └─────┬──────┘    │    │
-│  │        │               │               │               │            │    │
-│  │    ┌───┴───┐       ┌───┼───┐       ┌───┴───┐       ┌───┴───┐      │    │
-│  │    │ build │       │unit│e2e│       │staging│       │cleanup│      │    │
-│  │    │  job  │       │test│test│      │  job  │       │ job   │      │    │
-│  │    └───────┘       └───┴───┘       └───────┘       └───────┘      │    │
-│  │                                         │                          │    │
-│  │                                    ┌────┴────┐                     │    │
-│  │                                    │production│                     │    │
-│  │                                    │   job   │  (manual)           │    │
-│  │                                    └─────────┘                     │    │
-│  └─────────────────────────────────────────────────────────────────────┘    │
-│                                                                              │
-│                              ▼                                               │
-│  ┌─────────────────────────────────────────────────────────────────────┐    │
-│  │                         GITLAB RUNNERS                               │    │
-│  │   ┌──────────────┐  ┌──────────────┐  ┌──────────────┐             │    │
-│  │   │ Shared Runner│  │ Group Runner │  │Project Runner│             │    │
-│  │   │  (GitLab.com)│  │  (your org)  │  │  (dedicated) │             │    │
-│  │   └──────────────┘  └──────────────┘  └──────────────┘             │    │
-│  └─────────────────────────────────────────────────────────────────────┘    │
-│                                                                              │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
-
-### Key Terms
-
-| Term | Description |
-|------|-------------|
-| **Pipeline** | Top-level component, collection of stages |
-| **Stage** | Group of jobs that run in parallel |
-| **Job** | Task that runs scripts |
-| **Runner** | Agent that executes jobs |
-| **Artifact** | File passed between jobs |
-| **Cache** | Speeds up job execution |
+1. [GitLab CI Fundamentals](#gitlab-ci-fundamentals)
+2. [Pipeline Configuration](#pipeline-configuration)
+3. [Jobs and Stages](#jobs-and-stages)
+4. [Variables and Secrets](#variables-and-secrets)
+5. [Runners](#runners)
+6. [Caching and Artifacts](#caching-and-artifacts)
+7. [Environments and Deployments](#environments-and-deployments)
+8. [Advanced Patterns](#advanced-patterns)
+9. [Best Practices](#best-practices)
 
 ---
 
-## Complete Pipeline Example
+## GitLab CI Fundamentals
+
+### What is GitLab CI?
+
+**GitLab CI/CD** is GitLab's built-in continuous integration and delivery platform. Pipelines are defined in `.gitlab-ci.yml` at the repository root.
+
+### Key Concepts
+
+| Concept | Description |
+|---------|-------------|
+| **Pipeline** | Top-level CI/CD workflow |
+| **Stage** | Group of jobs that run together |
+| **Job** | Individual task to execute |
+| **Runner** | Agent that executes jobs |
+| **Artifact** | Files passed between jobs |
+
+### Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                     GITLAB CI/CD FLOW                                    │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                          │
+│   ┌──────────────┐                                                       │
+│   │    Commit    │  triggers pipeline                                   │
+│   └──────┬───────┘                                                       │
+│          │                                                               │
+│          ▼                                                               │
+│   ┌──────────────────────────────────────────────────────────────┐      │
+│   │                      PIPELINE                                 │      │
+│   │                                                              │      │
+│   │  Stage: build      Stage: test       Stage: deploy          │      │
+│   │  ┌──────────┐     ┌──────────┐      ┌──────────┐           │      │
+│   │  │  build   │ ──▶ │  test    │ ──▶  │  deploy  │           │      │
+│   │  └──────────┘     │  lint    │      └──────────┘           │      │
+│   │                   └──────────┘                              │      │
+│   │                                                              │      │
+│   └──────────────────────────────────────────────────────────────┘      │
+│                              │                                           │
+│                              ▼                                           │
+│   ┌──────────────────────────────────────────────────────────────┐      │
+│   │                       RUNNERS                                 │      │
+│   │    Shared       Group        Project        Self-hosted      │      │
+│   │    Runner       Runner       Runner         Runner           │      │
+│   └──────────────────────────────────────────────────────────────┘      │
+│                                                                          │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Pipeline Configuration
+
+### Basic Structure
 
 ```yaml
 # .gitlab-ci.yml
-
-# Variables available to all jobs
-variables:
-  DOCKER_REGISTRY: registry.gitlab.com
-  IMAGE_NAME: $CI_REGISTRY_IMAGE
-  KUBERNETES_NAMESPACE: myapp
-
-# Stages define execution order
 stages:
-  - validate
   - build
   - test
-  - security
   - deploy
-  - cleanup
 
-# Default settings for all jobs
-default:
-  image: node:18-alpine
-  before_script:
-    - echo "Pipeline $CI_PIPELINE_ID started"
-  after_script:
-    - echo "Job $CI_JOB_NAME completed"
-  retry:
-    max: 2
-    when:
-      - runner_system_failure
-      - stuck_or_timeout_failure
+variables:
+  APP_NAME: my-app
 
-# Cache node_modules
-cache:
-  key: ${CI_COMMIT_REF_SLUG}
-  paths:
-    - node_modules/
-  policy: pull-push
-
-# ============================================
-# VALIDATE STAGE
-# ============================================
-lint:
-  stage: validate
-  script:
-    - npm ci
-    - npm run lint
-  rules:
-    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
-    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
-
-validate-yaml:
-  stage: validate
-  image: python:3.11
-  script:
-    - pip install yamllint
-    - yamllint .
-  allow_failure: true
-
-# ============================================
-# BUILD STAGE
-# ============================================
 build:
   stage: build
+  image: node:20
   script:
     - npm ci
     - npm run build
   artifacts:
     paths:
       - dist/
-    expire_in: 1 week
-  rules:
-    - if: $CI_COMMIT_BRANCH
 
-build-docker:
-  stage: build
-  image: docker:24
-  services:
-    - docker:24-dind
-  variables:
-    DOCKER_TLS_CERTDIR: "/certs"
-  before_script:
-    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
-  script:
-    - docker build -t $IMAGE_NAME:$CI_COMMIT_SHA .
-    - docker push $IMAGE_NAME:$CI_COMMIT_SHA
-    - docker tag $IMAGE_NAME:$CI_COMMIT_SHA $IMAGE_NAME:latest
-    - docker push $IMAGE_NAME:latest
-  rules:
-    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
-    - if: $CI_COMMIT_TAG
-
-# ============================================
-# TEST STAGE
-# ============================================
-unit-tests:
+test:
   stage: test
+  image: node:20
   script:
     - npm ci
-    - npm test -- --coverage
-  coverage: '/Lines\s*:\s*(\d+\.?\d*)%/'
-  artifacts:
-    reports:
-      junit: junit.xml
-      coverage_report:
-        coverage_format: cobertura
-        path: coverage/cobertura-coverage.xml
-    paths:
-      - coverage/
-  needs:
-    - build
+    - npm test
 
-integration-tests:
-  stage: test
-  services:
-    - postgres:15
-    - redis:alpine
-  variables:
-    POSTGRES_DB: test
-    POSTGRES_USER: test
-    POSTGRES_PASSWORD: test
-    DATABASE_URL: postgres://test:test@postgres:5432/test
-    REDIS_URL: redis://redis:6379
-  script:
-    - npm ci
-    - npm run test:integration
-  needs:
-    - build
-
-e2e-tests:
-  stage: test
-  image: cypress/included:latest
-  script:
-    - npm ci
-    - npm run test:e2e
-  artifacts:
-    when: always
-    paths:
-      - cypress/screenshots/
-      - cypress/videos/
-  needs:
-    - build
-  allow_failure: true
-
-# ============================================
-# SECURITY STAGE
-# ============================================
-sast:
-  stage: security
-  image: 
-    name: securego/gosec:latest
-    entrypoint: [""]
-  script:
-    - echo "Running SAST..."
-  artifacts:
-    reports:
-      sast: gl-sast-report.json
-
-dependency-scan:
-  stage: security
-  script:
-    - npm audit --audit-level=high
-  allow_failure: true
-
-container-scan:
-  stage: security
-  image:
-    name: aquasec/trivy:latest
-    entrypoint: [""]
-  script:
-    - trivy image --exit-code 1 --severity HIGH,CRITICAL $IMAGE_NAME:$CI_COMMIT_SHA
-  needs:
-    - build-docker
-  rules:
-    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
-
-# ============================================
-# DEPLOY STAGE
-# ============================================
-deploy-staging:
+deploy:
   stage: deploy
-  image: bitnami/kubectl:latest
-  environment:
-    name: staging
-    url: https://staging.example.com
-    on_stop: stop-staging
   script:
-    - kubectl config set-cluster k8s --server=$KUBE_SERVER --certificate-authority=$KUBE_CA
-    - kubectl config set-credentials gitlab --token=$KUBE_TOKEN
-    - kubectl config set-context default --cluster=k8s --user=gitlab
-    - kubectl config use-context default
-    - kubectl set image deployment/app app=$IMAGE_NAME:$CI_COMMIT_SHA -n staging
-    - kubectl rollout status deployment/app -n staging --timeout=5m
-  needs:
-    - build-docker
-    - unit-tests
-  rules:
-    - if: $CI_COMMIT_BRANCH == "develop"
-
-stop-staging:
-  stage: deploy
-  image: bitnami/kubectl:latest
-  script:
-    - kubectl scale deployment/app --replicas=0 -n staging
-  environment:
-    name: staging
-    action: stop
-  when: manual
-  rules:
-    - if: $CI_COMMIT_BRANCH == "develop"
-
-deploy-production:
-  stage: deploy
-  image: bitnami/kubectl:latest
-  environment:
-    name: production
-    url: https://example.com
-  script:
-    - kubectl set image deployment/app app=$IMAGE_NAME:$CI_COMMIT_SHA -n production
-    - kubectl rollout status deployment/app -n production --timeout=10m
-  needs:
-    - build-docker
-    - unit-tests
-    - container-scan
-  rules:
-    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
-  when: manual
-
-# ============================================
-# CLEANUP STAGE
-# ============================================
-cleanup-images:
-  stage: cleanup
-  image: docker:24
-  services:
-    - docker:24-dind
-  script:
-    - 'docker images --filter "dangling=true" -q | xargs -r docker rmi || true'
-  when: always
-  rules:
-    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - ./deploy.sh
+  only:
+    - main
 ```
 
 ---
 
-## Parent-Child Pipelines
+## Jobs and Stages
 
-### Parent Pipeline
+### Job Configuration
 
 ```yaml
-# .gitlab-ci.yml
-stages:
-  - triggers
-
-trigger-frontend:
-  stage: triggers
-  trigger:
-    include: frontend/.gitlab-ci.yml
-    strategy: depend
+my-job:
+  stage: build
+  image: alpine:latest
+  
+  # Before and after scripts
+  before_script:
+    - echo "Setting up..."
+  
+  script:
+    - echo "Main commands"
+    - ./build.sh
+  
+  after_script:
+    - echo "Cleanup"
+  
+  # Conditions
   rules:
-    - changes:
-        - frontend/**/*
+    - if: $CI_COMMIT_BRANCH == "main"
+      when: always
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      when: manual
 
-trigger-backend:
-  stage: triggers
-  trigger:
-    include: backend/.gitlab-ci.yml
-    strategy: depend
-  rules:
-    - changes:
-        - backend/**/*
+  # Tags to select runner
+  tags:
+    - docker
+    - linux
+  
+  # Timeout
+  timeout: 30 minutes
+  
+  # Retry on failure
+  retry:
+    max: 2
+    when:
+      - runner_system_failure
+      - stuck_or_timeout_failure
 ```
 
-### Child Pipeline
+### Parallel Jobs
 
 ```yaml
-# frontend/.gitlab-ci.yml
+test:
+  stage: test
+  parallel: 4
+  script:
+    - npm test -- --shard=$CI_NODE_INDEX/$CI_NODE_TOTAL
+```
+
+### Job Dependencies
+
+```yaml
 stages:
   - build
   - test
+  - deploy
+
+build-frontend:
+  stage: build
+  script: npm run build:frontend
+  artifacts:
+    paths:
+      - frontend/dist/
+
+build-backend:
+  stage: build
+  script: npm run build:backend
+
+test:
+  stage: test
+  needs:
+    - build-frontend
+    - build-backend
+  script: npm test
+
+deploy:
+  stage: deploy
+  needs:
+    - job: test
+      artifacts: true
+  script: ./deploy.sh
+```
+
+---
+
+## Variables and Secrets
+
+### Variable Types
+
+```yaml
+variables:
+  # Global variables
+  APP_NAME: my-app
+  BUILD_TYPE: production
+
+job:
+  variables:
+    # Job-specific
+    JOB_VAR: value
+  script:
+    - echo $APP_NAME
+    - echo $CI_COMMIT_SHA  # Predefined
+```
+
+### Protected and Masked Variables
+
+```yaml
+# Set in GitLab UI (Settings → CI/CD → Variables)
+# - Protected: only available on protected branches
+# - Masked: hidden in logs
+
+job:
+  script:
+    - docker login -u $REGISTRY_USER -p $REGISTRY_PASSWORD
+    - ./deploy.sh --key=$DEPLOY_KEY
+```
+
+### Common Predefined Variables
+
+| Variable | Description |
+|----------|-------------|
+| `CI_COMMIT_SHA` | Full commit SHA |
+| `CI_COMMIT_SHORT_SHA` | First 8 chars of SHA |
+| `CI_COMMIT_BRANCH` | Branch name |
+| `CI_COMMIT_TAG` | Tag name |
+| `CI_PIPELINE_ID` | Pipeline ID |
+| `CI_JOB_ID` | Job ID |
+| `CI_PROJECT_NAME` | Project name |
+| `CI_PROJECT_DIR` | Checkout directory |
+
+---
+
+## Runners
+
+### Runner Types
+
+| Type | Description | Use Case |
+|------|-------------|----------|
+| Shared | Available to all projects | Default option |
+| Group | Available to group projects | Team-wide tools |
+| Project | Specific to one project | Special requirements |
+| Self-hosted | Your own infrastructure | Security, performance |
+
+### Docker Executor
+
+```yaml
+job:
+  image: node:20
+  services:
+    - postgres:15
+    - redis:7
+  variables:
+    POSTGRES_DB: test
+    POSTGRES_USER: test
+    POSTGRES_PASSWORD: test
+  script:
+    - npm test
+```
+
+### Kubernetes Executor
+
+```yaml
+# In runner config.toml
+[[runners]]
+  name = "kubernetes-runner"
+  executor = "kubernetes"
+  [runners.kubernetes]
+    namespace = "gitlab-runner"
+    [runners.kubernetes.pod_annotations]
+      "vault.hashicorp.com/agent-inject": "true"
+```
+
+---
+
+## Caching and Artifacts
+
+### Caching Dependencies
+
+```yaml
+variables:
+  npm_config_cache: "$CI_PROJECT_DIR/.npm"
+
+cache:
+  key:
+    files:
+      - package-lock.json
+  paths:
+    - .npm/
+    - node_modules/
 
 build:
-  stage: build
   script:
-    - cd frontend
-    - npm ci
+    - npm ci --cache .npm
     - npm run build
+```
+
+### Artifacts
+
+```yaml
+build:
+  script:
+    - npm run build
+  artifacts:
+    paths:
+      - dist/
+    reports:
+      junit: junit.xml
+      coverage_report:
+        coverage_format: cobertura
+        path: coverage/cobertura.xml
+    expire_in: 1 week
+
+test:
+  needs:
+    - job: build
+      artifacts: true
+  script:
+    - ls dist/  # Artifact from build job
 ```
 
 ---
 
 ## Environments and Deployments
+
+### Environment Configuration
+
+```yaml
+deploy-staging:
+  stage: deploy
+  environment:
+    name: staging
+    url: https://staging.example.com
+  script:
+    - ./deploy.sh staging
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+
+deploy-production:
+  stage: deploy
+  environment:
+    name: production
+    url: https://example.com
+  script:
+    - ./deploy.sh production
+  rules:
+    - if: $CI_COMMIT_TAG
+  when: manual
+```
+
+### Review Apps
 
 ```yaml
 deploy-review:
@@ -358,10 +367,9 @@ deploy-review:
   environment:
     name: review/$CI_COMMIT_REF_SLUG
     url: https://$CI_COMMIT_REF_SLUG.review.example.com
-    auto_stop_in: 1 week
     on_stop: stop-review
   script:
-    - deploy-to-review.sh
+    - ./deploy-review.sh
   rules:
     - if: $CI_MERGE_REQUEST_IID
 
@@ -371,109 +379,123 @@ stop-review:
     name: review/$CI_COMMIT_REF_SLUG
     action: stop
   script:
-    - teardown-review.sh
-  when: manual
+    - ./stop-review.sh
   rules:
     - if: $CI_MERGE_REQUEST_IID
+      when: manual
 ```
 
 ---
 
-## Templates and Includes
+## Advanced Patterns
 
-### Using Templates
+### Include and Extend
 
 ```yaml
+# .gitlab-ci.yml
 include:
-  # Official templates
+  - local: '/templates/docker-build.yml'
   - template: Security/SAST.gitlab-ci.yml
-  - template: Security/Dependency-Scanning.gitlab-ci.yml
-  
-  # Remote file
-  - remote: 'https://example.com/templates/deploy.yml'
-  
-  # Local file
-  - local: '/templates/common.yml'
-  
-  # From another project
-  - project: 'group/project'
+  - project: 'my-group/my-project'
+    file: '/templates/base.yml'
     ref: main
-    file: '/templates/deploy.yml'
-```
 
-### Creating Templates
-
-```yaml
-# templates/node-test.yml
-.node-test:
-  image: node:18
-  cache:
-    key: ${CI_COMMIT_REF_SLUG}
-    paths:
-      - node_modules/
+.base-job:
+  image: node:20
   before_script:
     - npm ci
 
-# Using the template
+build:
+  extends: .base-job
+  script:
+    - npm run build
+```
+
+### Parent-Child Pipelines
+
+```yaml
+# .gitlab-ci.yml
+trigger-backend:
+  trigger:
+    include: backend/.gitlab-ci.yml
+    strategy: depend
+
+trigger-frontend:
+  trigger:
+    include: frontend/.gitlab-ci.yml
+    strategy: depend
+```
+
+### Dynamic Pipelines
+
+```yaml
+generate-config:
+  stage: .pre
+  script:
+    - ./generate-pipeline.sh > generated-config.yml
+  artifacts:
+    paths:
+      - generated-config.yml
+
+trigger-generated:
+  stage: build
+  trigger:
+    include:
+      - artifact: generated-config.yml
+        job: generate-config
+```
+
+---
+
+## Best Practices
+
+### Performance
+
+1. **Use caching** - Speed up dependency installation
+2. **Parallelize** - Split test suites
+3. **Use `needs`** - Define job dependencies explicitly
+4. **Optimize images** - Use slim base images
+
+### Security
+
+1. **Use CI/CD variables** - Never hardcode secrets
+2. **Protected branches** - Restrict who can deploy
+3. **Masked variables** - Hide sensitive values
+4. **Review `.gitlab-ci.yml`** - Audit pipeline changes
+
+### Organization
+
+```yaml
+# Use anchors for reuse
+.npm-job: &npm-job
+  image: node:20
+  cache:
+    key: npm
+    paths:
+      - node_modules/
+
+build:
+  <<: *npm-job
+  stage: build
+  script:
+    - npm run build
+
 test:
-  extends: .node-test
+  <<: *npm-job
+  stage: test
   script:
     - npm test
 ```
 
----
+### Pipeline Rules
 
-## GitLab Runner Setup
-
-### Install Runner
-
-```bash
-# Linux
-curl -L https://packages.gitlab.com/install/repositories/runner/gitlab-runner/script.deb.sh | sudo bash
-sudo apt-get install gitlab-runner
-
-# Register
-sudo gitlab-runner register \
-  --url https://gitlab.com/ \
-  --registration-token YOUR_TOKEN \
-  --executor docker \
-  --docker-image alpine:latest \
-  --description "My Runner" \
-  --tag-list "docker,linux"
+```yaml
+workflow:
+  rules:
+    - if: $CI_COMMIT_TAG
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_PIPELINE_SOURCE == "web"
 ```
 
-### Runner Config
-
-```toml
-# /etc/gitlab-runner/config.toml
-concurrent = 4
-check_interval = 0
-
-[[runners]]
-  name = "Docker Runner"
-  url = "https://gitlab.com/"
-  token = "TOKEN"
-  executor = "docker"
-  [runners.docker]
-    image = "alpine:latest"
-    privileged = true
-    volumes = ["/cache", "/var/run/docker.sock:/var/run/docker.sock"]
-  [runners.cache]
-    Type = "s3"
-    Shared = true
-```
-
----
-
-## GitLab vs GitHub Actions
-
-| Feature | GitLab CI | GitHub Actions |
-|---------|-----------|----------------|
-| Config file | `.gitlab-ci.yml` | `.github/workflows/*.yml` |
-| Stages | Explicit stages | Jobs with `needs` |
-| Variables | `variables:` | `env:` |
-| Secrets | Settings → CI/CD | Settings → Secrets |
-| Runners | GitLab Runners | Runners |
-| Matrix | `parallel: matrix:` | `strategy: matrix:` |
-| Artifacts | `artifacts:` | `actions/upload-artifact` |
-| Cache | `cache:` | `actions/cache` |
+This guide covers GitLab CI/CD from fundamentals to advanced patterns for building robust deployment pipelines.

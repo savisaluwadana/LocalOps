@@ -1,451 +1,330 @@
-# CircleCI In-Depth Guide
+# CircleCI Complete Guide
 
-## What is CircleCI?
+## Table of Contents
 
-CircleCI is a cloud-native CI/CD platform that automates the build, test, and deployment of software. It's known for its speed, flexibility, and powerful caching mechanisms.
-
-## Core Concepts
-
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                         CIRCLECI ARCHITECTURE                                │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                              │
-│  Git Push / PR                                                               │
-│       │                                                                      │
-│       ▼                                                                      │
-│  ┌─────────────────────────────────────────────────────────────────────┐    │
-│  │                      PIPELINE (.circleci/config.yml)                 │    │
-│  │                                                                      │    │
-│  │  ┌─────────────────────────────────────────────────────────────┐    │    │
-│  │  │                      WORKFLOW: build-test-deploy             │    │    │
-│  │  │                                                              │    │    │
-│  │  │  ┌────────────┐                                              │    │    │
-│  │  │  │  JOB 1     │                                              │    │    │
-│  │  │  │   build    │                                              │    │    │
-│  │  │  └─────┬──────┘                                              │    │    │
-│  │  │        │                                                     │    │    │
-│  │  │        ├─────────────────┐                                   │    │    │
-│  │  │        │                 │                                   │    │    │
-│  │  │        ▼                 ▼                                   │    │    │
-│  │  │  ┌────────────┐   ┌────────────┐                            │    │    │
-│  │  │  │  JOB 2     │   │  JOB 3     │  (parallel)                │    │    │
-│  │  │  │ unit-test  │   │  lint      │                            │    │    │
-│  │  │  └─────┬──────┘   └─────┬──────┘                            │    │    │
-│  │  │        │                 │                                   │    │    │
-│  │  │        └────────┬────────┘                                   │    │    │
-│  │  │                 ▼                                            │    │    │
-│  │  │           ┌────────────┐                                     │    │    │
-│  │  │           │  JOB 4     │                                     │    │    │
-│  │  │           │  deploy    │  (requires: test, lint)            │    │    │
-│  │  │           └────────────┘                                     │    │    │
-│  │  └──────────────────────────────────────────────────────────────┘    │    │
-│  └─────────────────────────────────────────────────────────────────────┘    │
-│                              │                                               │
-│                              ▼                                               │
-│  ┌─────────────────────────────────────────────────────────────────────┐    │
-│  │                         EXECUTORS                                    │    │
-│  │   ┌──────────────┐  ┌──────────────┐  ┌──────────────┐             │    │
-│  │   │    Docker    │  │   Machine    │  │    macOS     │             │    │
-│  │   │  (container) │  │    (VM)      │  │  (iOS/macOS) │             │    │
-│  │   └──────────────┘  └──────────────┘  └──────────────┘             │    │
-│  └─────────────────────────────────────────────────────────────────────┘    │
-│                                                                              │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
-
-### Key Terms
-
-| Term | Description |
-|------|-------------|
-| **Pipeline** | Collection of workflows triggered by an event |
-| **Workflow** | Set of rules for running jobs |
-| **Job** | Collection of steps run on an executor |
-| **Step** | Executable command or orb action |
-| **Executor** | Environment where job runs (docker, machine, macos) |
-| **Orb** | Reusable package of configuration |
+1. [CircleCI Fundamentals](#circleci-fundamentals)
+2. [Configuration Basics](#configuration-basics)
+3. [Jobs and Workflows](#jobs-and-workflows)
+4. [Executors](#executors)
+5. [Commands and Orbs](#commands-and-orbs)
+6. [Caching and Workspaces](#caching-and-workspaces)
+7. [Contexts and Secrets](#contexts-and-secrets)
+8. [Advanced Patterns](#advanced-patterns)
+9. [Best Practices](#best-practices)
 
 ---
 
-## Complete Configuration Example
+## CircleCI Fundamentals
+
+### What is CircleCI?
+
+**CircleCI** is a cloud-native CI/CD platform known for its performance and flexibility. Configuration lives in `.circleci/config.yml`.
+
+### Key Concepts
+
+| Concept | Description |
+|---------|-------------|
+| **Pipeline** | Full CI run triggered by push |
+| **Workflow** | Orchestration of jobs |
+| **Job** | Collection of steps |
+| **Step** | Individual command |
+| **Executor** | Environment for jobs |
+| **Orb** | Reusable config packages |
+
+### Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                      CIRCLECI ARCHITECTURE                               │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                          │
+│   ┌──────────────┐                                                       │
+│   │   Pipeline   │  triggered by push/API                               │
+│   └──────┬───────┘                                                       │
+│          │                                                               │
+│          ▼                                                               │
+│   ┌──────────────────────────────────────────────────────────────┐      │
+│   │                     WORKFLOWS                                 │      │
+│   │                                                              │      │
+│   │   build-test-deploy:                                         │      │
+│   │   ┌──────┐    ┌──────┐    ┌───────┐    ┌────────┐          │      │
+│   │   │build │ ─▶ │ test │ ─▶ │deploy │ ─▶ │ deploy │          │      │
+│   │   │      │    │      │    │staging│    │  prod  │          │      │
+│   │   └──────┘    └──────┘    └───────┘    └────────┘          │      │
+│   │                                              │              │      │
+│   │                                         (requires          │      │
+│   │                                          approval)         │      │
+│   └──────────────────────────────────────────────────────────────┘      │
+│                              │                                           │
+│                              ▼                                           │
+│   ┌──────────────────────────────────────────────────────────────┐      │
+│   │                      EXECUTORS                                │      │
+│   │    Docker        Machine       macOS       Self-hosted       │      │
+│   │   Container        VM          VM           Runner           │      │
+│   └──────────────────────────────────────────────────────────────┘      │
+│                                                                          │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Configuration Basics
+
+### Basic Structure
 
 ```yaml
 # .circleci/config.yml
 version: 2.1
 
-# ============================================
-# ORBS - Reusable packages
-# ============================================
-orbs:
-  node: circleci/node@5.1.0
-  docker: circleci/docker@2.4.0
-  kubernetes: circleci/kubernetes@1.3.1
-  slack: circleci/slack@4.12.5
-
-# ============================================
-# PARAMETERS - Pipeline-level variables
-# ============================================
-parameters:
-  run-integration-tests:
-    type: boolean
-    default: true
-  target-environment:
-    type: enum
-    enum: [development, staging, production]
-    default: development
-
-# ============================================
-# EXECUTORS - Reusable execution environments
-# ============================================
-executors:
-  node-executor:
+jobs:
+  build:
     docker:
-      - image: cimg/node:18.18.0
-    working_directory: ~/app
-    resource_class: medium
-    environment:
-      NODE_ENV: test
-
-  node-with-services:
-    docker:
-      - image: cimg/node:18.18.0
-      - image: cimg/postgres:15.0
-        environment:
-          POSTGRES_USER: test
-          POSTGRES_DB: testdb
-          POSTGRES_PASSWORD: test
-      - image: cimg/redis:7.0
-    working_directory: ~/app
-
-  machine-executor:
-    machine:
-      image: ubuntu-2204:2023.10.1
-    resource_class: medium
-
-# ============================================
-# COMMANDS - Reusable step sequences
-# ============================================
-commands:
-  setup-dependencies:
-    description: "Install and cache dependencies"
+      - image: cimg/node:20.0
     steps:
       - checkout
-      - restore_cache:
-          keys:
-            - deps-v1-{{ checksum "package-lock.json" }}
-            - deps-v1-
       - run:
           name: Install dependencies
           command: npm ci
-      - save_cache:
-          key: deps-v1-{{ checksum "package-lock.json" }}
-          paths:
-            - node_modules
-
-  run-tests:
-    description: "Run test suite with coverage"
-    parameters:
-      test-type:
-        type: string
-        default: "unit"
-    steps:
       - run:
-          name: Run << parameters.test-type >> tests
-          command: npm run test:<< parameters.test-type >> -- --coverage
-      - store_test_results:
-          path: test-results
-      - store_artifacts:
-          path: coverage
-          destination: coverage-<< parameters.test-type >>
-
-  notify-slack:
-    description: "Send Slack notification"
-    parameters:
-      status:
-        type: string
-    steps:
-      - slack/notify:
-          event: << parameters.status >>
-          template: basic_success_1
-
-# ============================================
-# JOBS
-# ============================================
-jobs:
-  # ---------- BUILD ----------
-  build:
-    executor: node-executor
-    steps:
-      - setup-dependencies
-      - run:
-          name: Build application
+          name: Build
           command: npm run build
-      - persist_to_workspace:
-          root: .
-          paths:
-            - dist
-            - node_modules
-            - package.json
 
-  # ---------- LINT ----------
-  lint:
-    executor: node-executor
-    steps:
-      - setup-dependencies
-      - run:
-          name: Run ESLint
-          command: npm run lint -- --format junit --output-file test-results/eslint.xml
-      - store_test_results:
-          path: test-results
-
-  # ---------- UNIT TESTS ----------
-  unit-test:
-    executor: node-executor
-    parallelism: 4
-    steps:
-      - setup-dependencies
-      - run:
-          name: Split and run tests
-          command: |
-            TESTS=$(circleci tests glob "src/**/*.test.ts" | circleci tests split --split-by=timings)
-            npm test -- $TESTS
-      - store_test_results:
-          path: test-results
-      - store_artifacts:
-          path: coverage
-
-  # ---------- INTEGRATION TESTS ----------
-  integration-test:
-    executor: node-with-services
-    steps:
-      - setup-dependencies
-      - run:
-          name: Wait for services
-          command: |
-            dockerize -wait tcp://localhost:5432 -timeout 60s
-            dockerize -wait tcp://localhost:6379 -timeout 60s
-      - run:
-          name: Run migrations
-          command: npm run db:migrate
-      - run-tests:
-          test-type: integration
-
-  # ---------- SECURITY SCAN ----------
-  security-scan:
-    executor: node-executor
-    steps:
-      - setup-dependencies
-      - run:
-          name: Run npm audit
-          command: npm audit --audit-level=high
-      - run:
-          name: Run Snyk scan
-          command: |
-            npm install -g snyk
-            snyk test || true
-      - store_artifacts:
-          path: security-report
-
-  # ---------- BUILD DOCKER IMAGE ----------
-  build-docker:
-    executor: machine-executor
+  test:
+    docker:
+      - image: cimg/node:20.0
     steps:
       - checkout
-      - attach_workspace:
-          at: .
-      - run:
-          name: Build Docker image
-          command: |
-            docker build \
-              --build-arg VERSION=${CIRCLE_SHA1} \
-              --build-arg BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ) \
-              -t myapp:${CIRCLE_SHA1} \
-              -t myapp:latest .
-      - run:
-          name: Save Docker image
-          command: |
-            mkdir -p docker-cache
-            docker save myapp:${CIRCLE_SHA1} | gzip > docker-cache/image.tar.gz
-      - persist_to_workspace:
-          root: .
-          paths:
-            - docker-cache
+      - run: npm ci
+      - run: npm test
 
-  # ---------- PUSH DOCKER IMAGE ----------
-  push-docker:
-    executor: machine-executor
-    steps:
-      - attach_workspace:
-          at: .
-      - run:
-          name: Load Docker image
-          command: gunzip -c docker-cache/image.tar.gz | docker load
-      - run:
-          name: Push to registry
-          command: |
-            echo $DOCKER_PASSWORD | docker login -u $DOCKER_USERNAME --password-stdin
-            docker tag myapp:${CIRCLE_SHA1} $DOCKER_REGISTRY/myapp:${CIRCLE_SHA1}
-            docker tag myapp:${CIRCLE_SHA1} $DOCKER_REGISTRY/myapp:latest
-            docker push $DOCKER_REGISTRY/myapp:${CIRCLE_SHA1}
-            docker push $DOCKER_REGISTRY/myapp:latest
-
-  # ---------- DEPLOY STAGING ----------
-  deploy-staging:
-    executor: node-executor
-    steps:
-      - checkout
-      - kubernetes/install-kubectl
-      - run:
-          name: Configure kubectl
-          command: |
-            echo $KUBE_CONFIG_STAGING | base64 -d > kubeconfig
-            export KUBECONFIG=./kubeconfig
-      - run:
-          name: Deploy to staging
-          command: |
-            kubectl set image deployment/myapp myapp=$DOCKER_REGISTRY/myapp:${CIRCLE_SHA1} -n staging
-            kubectl rollout status deployment/myapp -n staging --timeout=5m
-      - run:
-          name: Run smoke tests
-          command: |
-            sleep 30
-            curl -f https://staging.example.com/health
-
-  # ---------- DEPLOY PRODUCTION ----------
-  deploy-production:
-    executor: node-executor
-    steps:
-      - checkout
-      - kubernetes/install-kubectl
-      - run:
-          name: Deploy to production
-          command: |
-            echo $KUBE_CONFIG_PRODUCTION | base64 -d > kubeconfig
-            export KUBECONFIG=./kubeconfig
-            kubectl set image deployment/myapp myapp=$DOCKER_REGISTRY/myapp:${CIRCLE_SHA1} -n production
-            kubectl rollout status deployment/myapp -n production --timeout=10m
-      - notify-slack:
-          status: pass
-
-# ============================================
-# WORKFLOWS
-# ============================================
 workflows:
-  version: 2
-
-  # Main CI/CD workflow
-  build-test-deploy:
-    jobs:
-      # Build job
-      - build:
-          filters:
-            branches:
-              ignore: /dependabot.*/
-
-      # Quality gates (parallel)
-      - lint:
-          requires:
-            - build
-      - unit-test:
-          requires:
-            - build
-      - security-scan:
-          requires:
-            - build
-
-      # Integration tests (conditional)
-      - integration-test:
-          requires:
-            - unit-test
-          filters:
-            branches:
-              only:
-                - main
-                - develop
-
-      # Build Docker image
-      - build-docker:
-          requires:
-            - lint
-            - unit-test
-            - security-scan
-          filters:
-            branches:
-              only:
-                - main
-                - develop
-
-      # Push Docker image
-      - push-docker:
-          requires:
-            - build-docker
-          context: docker-credentials
-
-      # Deploy to staging
-      - deploy-staging:
-          requires:
-            - push-docker
-            - integration-test
-          filters:
-            branches:
-              only: develop
-          context: kubernetes-staging
-
-      # Manual approval for production
-      - hold-for-approval:
-          type: approval
-          requires:
-            - push-docker
-            - integration-test
-          filters:
-            branches:
-              only: main
-
-      # Deploy to production
-      - deploy-production:
-          requires:
-            - hold-for-approval
-          filters:
-            branches:
-              only: main
-          context: kubernetes-production
-
-  # Nightly builds
-  nightly:
-    triggers:
-      - schedule:
-          cron: "0 0 * * *"
-          filters:
-            branches:
-              only: main
+  build-and-test:
     jobs:
       - build
-      - integration-test:
-          requires:
-            - build
-      - security-scan:
+      - test:
           requires:
             - build
 ```
 
 ---
 
-## Orbs Deep Dive
+## Jobs and Workflows
 
-### What are Orbs?
+### Job Configuration
 
-Orbs are reusable, shareable packages of CircleCI configuration. They encapsulate jobs, commands, and executors.
+```yaml
+jobs:
+  my-job:
+    docker:
+      - image: cimg/node:20.0
+    
+    # Working directory
+    working_directory: ~/project
+    
+    # Resource class
+    resource_class: medium
+    
+    # Environment variables
+    environment:
+      NODE_ENV: production
+    
+    # Parallelism
+    parallelism: 4
+    
+    steps:
+      - checkout
+      
+      # Run command
+      - run:
+          name: Run tests
+          command: |
+            TESTS=$(circleci tests glob "test/**/*.test.js" | circleci tests split)
+            npm test -- $TESTS
+      
+      # Store artifacts
+      - store_artifacts:
+          path: coverage
+          destination: coverage
+      
+      # Store test results
+      - store_test_results:
+          path: test-results
+```
 
-### Popular Orbs
+### Workflow Orchestration
 
-| Orb | Purpose |
-|-----|---------|
-| `circleci/node` | Node.js setup and caching |
-| `circleci/docker` | Docker build and push |
-| `circleci/kubernetes` | K8s deployment |
-| `circleci/aws-ecr` | AWS ECR integration |
-| `circleci/slack` | Slack notifications |
-| `circleci/terraform` | Terraform commands |
+```yaml
+workflows:
+  build-test-deploy:
+    jobs:
+      - build
+      
+      - test:
+          requires:
+            - build
+      
+      - lint:
+          requires:
+            - build
+      
+      # Parallel jobs after test
+      - security-scan:
+          requires:
+            - test
+      
+      # Manual approval
+      - hold-deploy:
+          type: approval
+          requires:
+            - test
+            - security-scan
+      
+      # Deploy after approval
+      - deploy:
+          requires:
+            - hold-deploy
+          filters:
+            branches:
+              only: main
+```
+
+### Conditional Workflows
+
+```yaml
+workflows:
+  # Only on main branch
+  deploy-prod:
+    when:
+      equal: [main, << pipeline.git.branch >>]
+    jobs:
+      - deploy
+
+  # Only on tags
+  release:
+    jobs:
+      - build:
+          filters:
+            tags:
+              only: /^v.*/
+            branches:
+              ignore: /.*/
+```
+
+---
+
+## Executors
+
+### Docker Executor
+
+```yaml
+jobs:
+  test:
+    docker:
+      # Primary container
+      - image: cimg/node:20.0
+        auth:
+          username: $DOCKERHUB_USERNAME
+          password: $DOCKERHUB_PASSWORD
+      
+      # Service containers
+      - image: postgres:15
+        environment:
+          POSTGRES_USER: test
+          POSTGRES_DB: test
+      
+      - image: redis:7
+    
+    steps:
+      - checkout
+      - run: npm test
+```
+
+### Machine Executor
+
+```yaml
+jobs:
+  build-docker:
+    machine:
+      image: ubuntu-2204:current
+    
+    steps:
+      - checkout
+      - run: docker build -t myapp .
+      - run: docker push myapp
+```
+
+### macOS Executor
+
+```yaml
+jobs:
+  build-ios:
+    macos:
+      xcode: "14.3.1"
+    
+    steps:
+      - checkout
+      - run: xcodebuild -scheme MyApp build
+```
+
+### Reusable Executors
+
+```yaml
+executors:
+  node-executor:
+    docker:
+      - image: cimg/node:20.0
+    working_directory: ~/project
+    environment:
+      NODE_ENV: production
+
+jobs:
+  build:
+    executor: node-executor
+    steps:
+      - checkout
+      - run: npm run build
+
+  test:
+    executor: node-executor
+    steps:
+      - checkout
+      - run: npm test
+```
+
+---
+
+## Commands and Orbs
+
+### Reusable Commands
+
+```yaml
+commands:
+  install-deps:
+    description: Install npm dependencies
+    parameters:
+      cache-key:
+        type: string
+        default: v1
+    steps:
+      - restore_cache:
+          keys:
+            - << parameters.cache-key >>-deps-{{ checksum "package-lock.json" }}
+      - run: npm ci
+      - save_cache:
+          paths:
+            - node_modules
+          key: << parameters.cache-key >>-deps-{{ checksum "package-lock.json" }}
+
+jobs:
+  build:
+    docker:
+      - image: cimg/node:20.0
+    steps:
+      - checkout
+      - install-deps:
+          cache-key: v2
+      - run: npm run build
+```
 
 ### Using Orbs
 
@@ -454,180 +333,175 @@ version: 2.1
 
 orbs:
   node: circleci/node@5.1.0
-  docker: circleci/docker@2.4.0
+  docker: circleci/docker@2.2.0
+  aws-cli: circleci/aws-cli@4.0.0
 
 jobs:
   build:
     executor: node/default
     steps:
       - checkout
-      - node/install-packages  # From orb
+      - node/install-packages
       - run: npm run build
 
-  publish:
-    executor: docker/docker
+  deploy:
+    executor: aws-cli/default
     steps:
-      - setup_remote_docker
-      - docker/check  # Login to Docker Hub
-      - docker/build:
-          image: myorg/myapp
-          tag: ${CIRCLE_SHA1}
-      - docker/push:
-          image: myorg/myapp
-          tag: ${CIRCLE_SHA1}
-```
-
-### Creating Custom Orbs
-
-```yaml
-# orbs/my-orb/orb.yml
-version: 2.1
-
-description: My custom orb
-
-executors:
-  default:
-    docker:
-      - image: cimg/base:current
-
-commands:
-  greet:
-    parameters:
-      name:
-        type: string
-        default: "World"
-    steps:
-      - run: echo "Hello, << parameters.name >>!"
-
-jobs:
-  hello-job:
-    executor: default
-    steps:
-      - greet:
-          name: "CircleCI"
+      - aws-cli/setup
+      - run: aws s3 sync dist/ s3://my-bucket/
 ```
 
 ---
 
-## Caching Strategies
+## Caching and Workspaces
 
-### Dependency Caching
+### Caching
 
 ```yaml
 jobs:
   build:
+    docker:
+      - image: cimg/node:20.0
     steps:
       - checkout
       
       # Restore cache
       - restore_cache:
           keys:
-            - v1-deps-{{ checksum "package-lock.json" }}
-            - v1-deps-{{ .Branch }}
-            - v1-deps-
+            - npm-deps-{{ checksum "package-lock.json" }}
+            - npm-deps-
       
       - run: npm ci
       
       # Save cache
       - save_cache:
-          key: v1-deps-{{ checksum "package-lock.json" }}
           paths:
             - node_modules
-            - ~/.npm
+          key: npm-deps-{{ checksum "package-lock.json" }}
 ```
 
-### Docker Layer Caching (DLC)
-
-```yaml
-jobs:
-  build-image:
-    machine:
-      docker_layer_caching: true  # Requires paid plan
-    steps:
-      - checkout
-      - run: docker build -t myapp .
-```
-
----
-
-## Parallelism and Test Splitting
-
-```yaml
-jobs:
-  test:
-    parallelism: 4  # Run on 4 containers
-    steps:
-      - checkout
-      - run:
-          name: Run tests in parallel
-          command: |
-            # Glob all test files
-            TESTFILES=$(circleci tests glob "**/*.test.js")
-            
-            # Split by timing data
-            TESTFILES=$(echo $TESTFILES | circleci tests split --split-by=timings)
-            
-            # Run assigned tests
-            npm test -- $TESTFILES
-      
-      - store_test_results:
-          path: test-results
-```
-
----
-
-## Workspaces vs Caching
-
-| Feature | Workspace | Cache |
-|---------|-----------|-------|
-| **Purpose** | Pass data between jobs in same workflow | Speed up future builds |
-| **Lifetime** | Duration of workflow | Up to 15 days |
-| **Use case** | Build artifacts, compiled code | Dependencies, node_modules |
-
-### Workspace Example
+### Workspaces
 
 ```yaml
 jobs:
   build:
+    docker:
+      - image: cimg/node:20.0
     steps:
+      - checkout
+      - run: npm ci
       - run: npm run build
+      
+      # Persist to workspace
       - persist_to_workspace:
           root: .
           paths:
             - dist
+            - node_modules
 
   deploy:
+    docker:
+      - image: cimg/node:20.0
     steps:
+      # Attach workspace
       - attach_workspace:
           at: .
-      - run: ls dist  # Built files available
+      
+      - run: ls dist/  # Built files available
+      - run: ./deploy.sh
+
+workflows:
+  build-deploy:
+    jobs:
+      - build
+      - deploy:
+          requires:
+            - build
 ```
 
 ---
 
 ## Contexts and Secrets
 
-### Creating Contexts (UI)
-
-1. Go to Organization Settings → Contexts
-2. Create context (e.g., `aws-production`)
-3. Add environment variables
-
 ### Using Contexts
 
 ```yaml
+# Contexts are configured in CircleCI UI
+# Organization Settings → Contexts
+
 workflows:
   deploy:
     jobs:
+      - deploy-staging:
+          context: staging-env
+      
       - deploy-prod:
           context:
-            - aws-production
-            - slack-notifications
+            - prod-env
+            - aws-credentials
+```
+
+### Environment Variables
+
+```yaml
+jobs:
+  deploy:
+    docker:
+      - image: cimg/node:20.0
+    environment:
+      # Job-level
+      NODE_ENV: production
+    steps:
+      - run:
+          name: Deploy
+          environment:
+            # Step-level
+            DEPLOY_TARGET: production
+          command: |
+            echo "Deploying to $DEPLOY_TARGET"
+            # Project env vars from CircleCI settings
+            echo "Using key: $AWS_ACCESS_KEY_ID"
 ```
 
 ---
 
-## Matrix Jobs
+## Advanced Patterns
+
+### Pipeline Parameters
+
+```yaml
+version: 2.1
+
+parameters:
+  deploy-env:
+    type: string
+    default: staging
+  skip-tests:
+    type: boolean
+    default: false
+
+jobs:
+  test:
+    docker:
+      - image: cimg/node:20.0
+    steps:
+      - checkout
+      - when:
+          condition:
+            not: << pipeline.parameters.skip-tests >>
+          steps:
+            - run: npm test
+
+  deploy:
+    docker:
+      - image: cimg/node:20.0
+    steps:
+      - run: ./deploy.sh << pipeline.parameters.deploy-env >>
+
+# Trigger with: circleci pipeline trigger --param deploy-env=production
+```
+
+### Matrix Jobs
 
 ```yaml
 jobs:
@@ -635,36 +509,103 @@ jobs:
     parameters:
       node-version:
         type: string
-      os:
-        type: executor
-    executor: << parameters.os >>
+    docker:
+      - image: cimg/node:<< parameters.node-version >>
     steps:
-      - node/install:
-          node-version: << parameters.node-version >>
+      - checkout
       - run: npm test
 
 workflows:
-  test-matrix:
+  test-all-versions:
     jobs:
       - test:
           matrix:
             parameters:
-              node-version: ["16", "18", "20"]
-              os: [node/default, machine-executor]
-            exclude:
-              - node-version: "16"
-                os: machine-executor
+              node-version: ["18.0", "20.0", "21.0"]
+```
+
+### Dynamic Configuration
+
+```yaml
+# .circleci/config.yml
+version: 2.1
+
+setup: true
+
+orbs:
+  continuation: circleci/continuation@0.3.1
+
+jobs:
+  generate-config:
+    docker:
+      - image: cimg/base:current
+    steps:
+      - checkout
+      - run:
+          name: Generate config
+          command: ./generate-pipeline.sh > generated-config.yml
+      - continuation/continue:
+          configuration_path: generated-config.yml
 ```
 
 ---
 
-## CircleCI vs GitHub Actions vs GitLab CI
+## Best Practices
 
-| Feature | CircleCI | GitHub Actions | GitLab CI |
-|---------|----------|----------------|-----------|
-| Config file | `.circleci/config.yml` | `.github/workflows/*.yml` | `.gitlab-ci.yml` |
-| Orbs/Packages | Orbs | Actions | Templates |
-| Parallelism | Native (parallelism) | Matrix | parallel: |
-| Docker Layer Cache | Yes (paid) | No | No |
-| Self-hosted | CircleCI runners | Self-hosted runners | GitLab runners |
-| Free tier | 6000 mins/month | 2000 mins/month | 400 mins/month |
+### Performance
+
+1. **Use caching** - Restore dependencies
+2. **Use workspaces** - Pass artifacts between jobs
+3. **Parallelize tests** - Split across containers
+4. **Right-size resources** - Match resource class to needs
+
+```yaml
+jobs:
+  test:
+    parallelism: 4
+    steps:
+      - run:
+          name: Split and run tests
+          command: |
+            TESTS=$(circleci tests glob "test/**/*.js" | circleci tests split --split-by=timings)
+            npm test -- $TESTS
+```
+
+### Security
+
+1. **Use contexts** - Organize secrets by environment
+2. **Restrict contexts** - Limit to specific branches
+3. **Use project variables** - For secrets
+4. **OIDC** - For cloud authentication
+
+### Organization
+
+```yaml
+# Use YAML anchors
+defaults: &defaults
+  docker:
+    - image: cimg/node:20.0
+  working_directory: ~/project
+
+jobs:
+  build:
+    <<: *defaults
+    steps:
+      - checkout
+      - run: npm run build
+
+  test:
+    <<: *defaults
+    steps:
+      - checkout
+      - run: npm test
+```
+
+### Cost Optimization
+
+1. **Use resource classes wisely** - Smaller for simple tasks
+2. **Cancel redundant builds** - Auto-cancel on new push
+3. **Conditional workflows** - Skip when not needed
+4. **Cache everything** - Reduce build time
+
+This guide covers CircleCI from fundamentals to advanced patterns for building efficient CI/CD pipelines.

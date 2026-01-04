@@ -1,197 +1,246 @@
-# Monitoring & Observability
+# Observability and Monitoring Complete Guide
 
-## Overview
+## Table of Contents
 
-Monitoring is essential in DevOps. This guide covers the **Prometheus + Grafana** stack - the industry standard for metrics collection and visualization.
+1. [Observability Fundamentals](#observability-fundamentals)
+2. [The Three Pillars](#the-three-pillars)
+3. [Metrics with Prometheus](#metrics-with-prometheus)
+4. [Visualization with Grafana](#visualization-with-grafana)
+5. [Logging Architecture](#logging-architecture)
+6. [Distributed Tracing](#distributed-tracing)
+7. [Alerting Strategies](#alerting-strategies)
+8. [SLIs, SLOs, and SLAs](#slis-slos-and-slas)
+9. [Best Practices](#best-practices)
+
+---
+
+## Observability Fundamentals
+
+### What is Observability?
+
+**Observability** is the ability to understand the internal state of a system by examining its external outputs.
+
+### Monitoring vs Observability
+
+| Aspect | Monitoring | Observability |
+|--------|------------|---------------|
+| Focus | Known unknowns | Unknown unknowns |
+| Approach | Predefined metrics | Exploratory queries |
+| Questions | "Is CPU high?" | "Why are German users slow?" |
+| Style | Dashboard-centric | Query-centric |
+
+---
+
+## The Three Pillars
+
+### Overview
+
+```
+┌──────────────┐   ┌──────────────┐   ┌──────────────┐
+│   METRICS    │   │    LOGS      │   │   TRACES     │
+├──────────────┤   ├──────────────┤   ├──────────────┤
+│ Quantitative │   │ Qualitative  │   │ Causal       │
+│ measurements │   │ events with  │   │ relationships│
+│ over time    │   │ context      │   │ between svcs │
+│              │   │              │   │              │
+│ WHAT is      │   │ WHY it       │   │ WHERE it     │
+│ happening?   │   │ happened?    │   │ happened?    │
+└──────────────┘   └──────────────┘   └──────────────┘
+```
+
+### Metrics
+
+**Numbers that describe system behavior over time.**
+
+| Type | Description | Example |
+|------|-------------|---------|
+| **Counter** | Only goes up | Total requests |
+| **Gauge** | Goes up or down | Temperature |
+| **Histogram** | Distribution | Request latency buckets |
+
+### Logs
+
+**Timestamped records of discrete events.**
+
+```
+2024-01-15 INFO  [user-service] Login successful user_id=12345
+2024-01-15 ERROR [order-service] Payment failed order_id=67890
+```
+
+### Traces
+
+**The path of a request through distributed services.**
+
+```
+Trace ID: abc123
+├── [API Gateway]     250ms total
+│   ├── [Auth Svc]    45ms
+│   └── [Order Svc]   150ms
+│       └── [DB]      50ms
+```
+
+---
+
+## Metrics with Prometheus
 
 ### Architecture
 
+Prometheus uses a **pull model** - it scrapes metrics from target endpoints.
+
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                    MONITORING STACK                              │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                  │
-│  Applications    ┌───────────┐    ┌───────────┐    ┌──────────┐ │
-│  & Services ───► │Prometheus │───►│  Grafana  │───►│   You    │ │
-│  (metrics)       │ (collect) │    │(visualize)│    │(dashboards)│
-│                  └───────────┘    └───────────┘    └──────────┘ │
-│                        │                                         │
-│                        ▼                                         │
-│                  ┌───────────┐                                   │
-│                  │Alertmanager│──► Slack/Email/PagerDuty        │
-│                  └───────────┘                                   │
-└─────────────────────────────────────────────────────────────────┘
-```
-
----
-
-## Core Concepts
-
-### Prometheus
-
-**Prometheus** is a time-series database that:
-- **Scrapes** metrics from targets at regular intervals
-- **Stores** data efficiently with compression
-- Uses **PromQL** for querying
-
-**Metric Types:**
-| Type | Description | Example |
-|------|-------------|---------|
-| Counter | Only increases | `http_requests_total` |
-| Gauge | Can go up/down | `memory_usage_bytes` |
-| Histogram | Distributions | `request_duration_seconds` |
-| Summary | Similar to histogram | `request_latency` |
-
-### Grafana
-
-**Grafana** is a visualization platform that:
-- Creates beautiful dashboards
-- Supports multiple data sources
-- Provides alerting capabilities
-
----
-
-## Hands-On: Deploy Monitoring Stack
-
-### Docker Compose Setup
-
-Create `playground/monitoring/docker-compose.yml`:
-
-```yaml
-version: '3.8'
-
-services:
-  prometheus:
-    image: prom/prometheus:latest
-    container_name: prometheus
-    ports:
-      - "9090:9090"
-    volumes:
-      - ./prometheus.yml:/etc/prometheus/prometheus.yml
-      - prometheus_data:/prometheus
-    command:
-      - '--config.file=/etc/prometheus/prometheus.yml'
-      - '--storage.tsdb.path=/prometheus'
-    restart: unless-stopped
-
-  grafana:
-    image: grafana/grafana:latest
-    container_name: grafana
-    ports:
-      - "3000:3000"
-    environment:
-      - GF_SECURITY_ADMIN_PASSWORD=admin123
-      - GF_USERS_ALLOW_SIGN_UP=false
-    volumes:
-      - grafana_data:/var/lib/grafana
-    depends_on:
-      - prometheus
-    restart: unless-stopped
-
-  node-exporter:
-    image: prom/node-exporter:latest
-    container_name: node-exporter
-    ports:
-      - "9100:9100"
-    restart: unless-stopped
-
-  cadvisor:
-    image: gcr.io/cadvisor/cadvisor:latest
-    container_name: cadvisor
-    ports:
-      - "8081:8080"
-    volumes:
-      - /:/rootfs:ro
-      - /var/run:/var/run:ro
-      - /sys:/sys:ro
-      - /var/lib/docker/:/var/lib/docker:ro
-    restart: unless-stopped
-
-volumes:
-  prometheus_data:
-  grafana_data:
+┌──────────────┐     ┌──────────────┐
+│ Application  │     │ Application  │
+│  /metrics    │     │  /metrics    │
+└──────┬───────┘     └──────┬───────┘
+       │   PULL             │
+       ▼                    ▼
+┌─────────────────────────────────┐
+│      PROMETHEUS SERVER          │
+│  ┌─────────┐  ┌──────────────┐  │
+│  │ Scraper │─▶│ Time Series  │  │
+│  └─────────┘  │   Database   │  │
+│               └──────────────┘  │
+└───────────────┬─────────────────┘
+                │
+        ┌───────┴───────┐
+        ▼               ▼
+  ┌──────────┐   ┌─────────────┐
+  │ Grafana  │   │ Alertmanager│
+  └──────────┘   └─────────────┘
 ```
 
-Create `playground/monitoring/prometheus.yml`:
-
-```yaml
-global:
-  scrape_interval: 15s
-  evaluation_interval: 15s
-
-alerting:
-  alertmanagers:
-    - static_configs:
-        - targets: []
-
-scrape_configs:
-  - job_name: 'prometheus'
-    static_configs:
-      - targets: ['localhost:9090']
-
-  - job_name: 'node-exporter'
-    static_configs:
-      - targets: ['node-exporter:9100']
-
-  - job_name: 'cadvisor'
-    static_configs:
-      - targets: ['cadvisor:8080']
-```
-
-### Start the Stack
-
-```bash
-cd playground/monitoring
-docker compose up -d
-
-# Access:
-# Prometheus: http://localhost:9090
-# Grafana: http://localhost:3000 (admin/admin123)
-# Node Exporter: http://localhost:9100/metrics
-```
-
-### Configure Grafana
-
-1. Login to Grafana (admin/admin123)
-2. Go to **Configuration → Data Sources**
-3. Add **Prometheus** with URL: `http://prometheus:9090`
-4. Import dashboard ID **1860** (Node Exporter Full)
-
----
-
-## PromQL Examples
+### PromQL Examples
 
 ```promql
-# CPU Usage %
-100 - (avg by(instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100)
-
-# Memory Usage %
-(1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100
-
-# Disk Usage %
-(1 - node_filesystem_avail_bytes / node_filesystem_size_bytes) * 100
-
-# HTTP Request Rate
+# Request rate per second
 rate(http_requests_total[5m])
 
-# 95th percentile latency
-histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m]))
+# Error rate percentage
+sum(rate(http_requests_total{status=~"5.."}[5m])) / 
+sum(rate(http_requests_total[5m])) * 100
+
+# P99 latency
+histogram_quantile(0.99, rate(http_request_duration_seconds_bucket[5m]))
 ```
 
 ---
 
-## Kubernetes Monitoring
+## Visualization with Grafana
 
-For K8s, use **kube-prometheus-stack** (Helm chart):
+### Design Methods
 
-```bash
-helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
-helm install monitoring prometheus-community/kube-prometheus-stack \
-  --namespace monitoring --create-namespace
+**RED Method (Services):**
+- **R**ate: Request throughput
+- **E**rrors: Failed requests
+- **D**uration: Latency
+
+**USE Method (Resources):**
+- **U**tilization: % busy
+- **S**aturation: Queue length
+- **E**rrors: Error count
+
+---
+
+## Logging Architecture
+
+### Centralized Logging
+
+```
+Apps → Log Shipper → Storage → Visualization
+       (Fluentd)    (Loki)    (Grafana)
 ```
 
-Access Grafana:
-```bash
-kubectl port-forward svc/monitoring-grafana 3000:80 -n monitoring
-# Default: admin/prom-operator
+### Structured Logging
+
+```json
+{
+  "timestamp": "2024-01-15T10:23:45Z",
+  "level": "INFO",
+  "service": "auth-service",
+  "message": "User logged in",
+  "user_id": "12345",
+  "trace_id": "abc123"
+}
 ```
+
+---
+
+## Distributed Tracing
+
+### How It Works
+
+1. Generate **trace_id** at entry point
+2. Each service creates a **span**
+3. Spans linked via **parent_id**
+4. All spans share same **trace_id**
+
+### Tools
+
+| Tool | Description |
+|------|-------------|
+| **Jaeger** | Open source tracing |
+| **Zipkin** | Twitter's tracing |
+| **Tempo** | Grafana's trace storage |
+| **OpenTelemetry** | Vendor-neutral standard |
+
+---
+
+## Alerting Strategies
+
+### Good Alert Design
+
+| Principle | Bad Example | Good Example |
+|-----------|-------------|--------------|
+| Symptom-based | CPU > 80% | Error rate > 1% |
+| Has duration | Instant trigger | For 5 minutes |
+| Actionable | "Something's wrong" | Link to runbook |
+
+### Severity Levels
+
+| Level | Response | Example |
+|-------|----------|---------|
+| Critical | Immediate | Site down |
+| Warning | Hours | Degraded perf |
+| Info | Next sprint | Cleanup needed |
+
+---
+
+## SLIs, SLOs, and SLAs
+
+### Definitions
+
+- **SLI**: Measurement (P99 = 145ms)
+- **SLO**: Target (P99 < 200ms)
+- **SLA**: Contract with consequences
+
+### Error Budget
+
+If SLO = 99.9% availability per month:
+- 30 days = 43,200 minutes
+- 0.1% = 43.2 minutes allowed downtime
+
+This is your **error budget** to "spend" on deployments and incidents.
+
+---
+
+## Best Practices
+
+### Instrumentation
+
+1. Instrument at service boundaries
+2. Include request identifiers
+3. Log structured data (JSON)
+4. Use consistent naming
+
+### Dashboards
+
+1. Start with golden signals
+2. Show what's "normal"
+3. Link to runbooks
+
+### Alerting
+
+1. Alert on symptoms, not causes
+2. Require duration (avoid flapping)
+3. Include runbook links
+4. Test alerts regularly

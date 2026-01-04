@@ -1,144 +1,324 @@
-# GitOps with ArgoCD
+# GitOps Complete Guide
 
-## What is GitOps?
+## Table of Contents
 
-**GitOps** is a paradigm where Git is the single source of truth for infrastructure and applications. Changes are made via Git commits, and automation syncs the desired state to the cluster.
-
-### GitOps Workflow
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                       GITOPS FLOW                                │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                  │
-│  Developer    ┌──────────┐    ┌──────────┐    ┌──────────────┐  │
-│  ──────────►  │   Git    │───►│  ArgoCD  │───►│  Kubernetes  │  │
-│  (commit)     │  (repo)  │    │  (sync)  │    │  (cluster)   │  │
-│               └──────────┘    └──────────┘    └──────────────┘  │
-│                    ▲               │                             │
-│                    │               │  Continuous                 │
-│                    └───────────────┘  Reconciliation             │
-│                                                                  │
-└─────────────────────────────────────────────────────────────────┘
-```
-
-### Benefits
-
-| Traditional | GitOps |
-|-------------|--------|
-| `kubectl apply` manually | Git push triggers deploy |
-| No audit trail | Full Git history |
-| Imperative | Declarative |
-| Hard to rollback | `git revert` to rollback |
+1. [GitOps Fundamentals](#gitops-fundamentals)
+2. [Core Principles](#core-principles)
+3. [GitOps vs Traditional CI/CD](#gitops-vs-traditional-cicd)
+4. [ArgoCD](#argocd)
+5. [Flux](#flux)
+6. [Repository Strategies](#repository-strategies)
+7. [Best Practices](#best-practices)
 
 ---
 
-## ArgoCD Setup
+## GitOps Fundamentals
 
-### Install ArgoCD
+### What is GitOps?
 
-```bash
-# Create namespace
-kubectl create namespace argocd
+**GitOps** is an operational model for cloud-native applications. It uses Git as the single source of truth for declarative infrastructure and applications.
 
-# Install ArgoCD
-kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
+### The Core Idea
 
-# Wait for pods
-kubectl wait --for=condition=Ready pods --all -n argocd --timeout=300s
 ```
-
-### Access the UI
-
-```bash
-# Port forward
-kubectl port-forward svc/argocd-server -n argocd 8080:443
-
-# Get initial admin password
-kubectl -n argocd get secret argocd-initial-admin-secret \
-  -o jsonpath="{.data.password}" | base64 -d
-
-# Login: https://localhost:8080
-# Username: admin
-# Password: (from above)
-```
-
-### Install ArgoCD CLI
-
-```bash
-brew install argocd
-
-# Login
-argocd login localhost:8080 --insecure
+┌─────────────────────────────────────────────────────────────────────────┐
+│                         GITOPS MODEL                                     │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                          │
+│   Traditional:                                                           │
+│   Developer → CI Pipeline → kubectl apply → Cluster                     │
+│               (push-based)                                               │
+│                                                                          │
+│   GitOps:                                                                │
+│   Developer → Git Repo ← GitOps Operator → Cluster                      │
+│              (commit)   (pull-based)                                     │
+│                                                                          │
+│   Key difference: The CLUSTER pulls from Git,                           │
+│                   not the CI pushes to cluster                          │
+│                                                                          │
+└─────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## Hands-On: Deploy an App with GitOps
+## Core Principles
 
-### 1. Create Application Manifest
+### 1. Declarative Configuration
 
-Create `playground/argocd/guestbook-app.yaml`:
+Everything is defined as code - infrastructure, applications, policies.
+
+```yaml
+# What you want, not how to do it
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: my-app
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: my-app
+```
+
+### 2. Git as Single Source of Truth
+
+- All desired state is in Git
+- Git history = audit log
+- Git branches = environments
+
+### 3. Automated Synchronization
+
+GitOps operators continuously reconcile:
+
+```
+Git State (Desired) ←→ Cluster State (Actual)
+        │                       │
+        └───────────────────────┘
+             Sync/Reconcile
+```
+
+### 4. Continuous Reconciliation
+
+The operator doesn't just sync once - it continuously ensures the cluster matches Git.
+
+---
+
+## GitOps vs Traditional CI/CD
+
+| Aspect | Traditional CI/CD | GitOps |
+|--------|-------------------|--------|
+| Deployment trigger | CI pipeline (push) | Git commit (pull) |
+| Who accesses cluster | CI system | GitOps operator only |
+| Rollback | Re-run pipeline | Git revert |
+| Drift detection | Manual/none | Automatic |
+| Audit trail | CI logs | Git history |
+| Credentials | CI needs kubectl | Operator runs in cluster |
+
+---
+
+## ArgoCD
+
+### What is ArgoCD?
+
+**ArgoCD** is a declarative GitOps continuous delivery tool for Kubernetes.
+
+### Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                        ARGOCD ARCHITECTURE                               │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                          │
+│   ┌──────────────┐                                                       │
+│   │   Git Repo   │  ← Source of truth                                   │
+│   │  (manifests) │                                                       │
+│   └──────┬───────┘                                                       │
+│          │                                                               │
+│          │ pull                                                          │
+│          ▼                                                               │
+│   ┌──────────────────────────────────────────────────────────┐          │
+│   │                    ARGOCD                                 │          │
+│   │                                                          │          │
+│   │  ┌──────────┐  ┌──────────┐  ┌──────────────────────┐   │          │
+│   │  │ Repo     │  │ App      │  │ Application          │   │          │
+│   │  │ Server   │→ │ Controller│→ │ Controller          │   │          │
+│   │  └──────────┘  └──────────┘  └──────────────────────┘   │          │
+│   │                                        │                 │          │
+│   │  ┌──────────┐              apply      │                 │          │
+│   │  │ API      │              ▼          │                 │          │
+│   │  │ Server   │        ┌─────────────┐  │                 │          │
+│   │  └──────────┘        │ Kubernetes  │  │                 │          │
+│   │       ▲              │ Cluster     │◀─┘                 │          │
+│   │       │              └─────────────┘                    │          │
+│   │  ┌────────────┐                                         │          │
+│   │  │  Web UI    │                                         │          │
+│   │  └────────────┘                                         │          │
+│   └──────────────────────────────────────────────────────────┘          │
+│                                                                          │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+### Application Definition
 
 ```yaml
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: guestbook
+  name: my-app
   namespace: argocd
 spec:
   project: default
+  
   source:
-    repoURL: https://github.com/argoproj/argocd-example-apps.git
-    targetRevision: HEAD
-    path: guestbook
+    repoURL: https://github.com/myorg/my-app-config
+    targetRevision: main
+    path: k8s/production
+  
   destination:
     server: https://kubernetes.default.svc
-    namespace: guestbook
+    namespace: production
+  
   syncPolicy:
     automated:
-      prune: true
-      selfHeal: true
+      prune: true       # Delete resources not in Git
+      selfHeal: true    # Fix drift automatically
     syncOptions:
       - CreateNamespace=true
 ```
 
-### 2. Apply and Watch
+### Sync Strategies
 
-```bash
-kubectl apply -f playground/argocd/guestbook-app.yaml
+| Strategy | Description | Use Case |
+|----------|-------------|----------|
+| Manual | Click to sync | Production |
+| Automated | Sync on Git changes | Dev/staging |
+| Self-heal | Fix drift automatically | All environments |
+| Prune | Delete orphaned resources | All environments |
 
-# Watch sync status
-argocd app get guestbook
+---
 
-# View in UI at https://localhost:8080
+## Flux
+
+### What is Flux?
+
+**Flux** is a GitOps toolkit for Kubernetes, part of the CNCF.
+
+### Core Components
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                          FLUX COMPONENTS                                 │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                          │
+│   source-controller    ─▶ Fetches from Git, Helm, OCI                   │
+│                                                                          │
+│   kustomize-controller ─▶ Applies Kustomize overlays                    │
+│                                                                          │
+│   helm-controller      ─▶ Manages Helm releases                         │
+│                                                                          │
+│   notification-controller ─▶ Handles alerts and webhooks                │
+│                                                                          │
+│   image-automation      ─▶ Updates Git when new images available        │
+│                                                                          │
+└─────────────────────────────────────────────────────────────────────────┘
 ```
 
-### 3. Create Your Own GitOps Repo
+### GitRepository Definition
 
-Structure:
+```yaml
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: GitRepository
+metadata:
+  name: my-app
+  namespace: flux-system
+spec:
+  interval: 1m
+  url: https://github.com/myorg/my-app-config
+  ref:
+    branch: main
+  secretRef:
+    name: git-credentials
 ```
-my-gitops-repo/
-├── apps/
-│   ├── dev/
-│   │   └── nginx.yaml
-│   ├── staging/
-│   │   └── nginx.yaml
-│   └── prod/
-│       └── nginx.yaml
+
+### Kustomization Definition
+
+```yaml
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: my-app
+  namespace: flux-system
+spec:
+  interval: 10m
+  sourceRef:
+    kind: GitRepository
+    name: my-app
+  path: ./k8s/production
+  prune: true
+  healthChecks:
+    - kind: Deployment
+      name: my-app
+      namespace: production
+```
+
+---
+
+## Repository Strategies
+
+### Mono-repo
+
+All environments in one repository:
+
+```
+my-app-config/
 ├── base/
 │   ├── deployment.yaml
-│   ├── service.yaml
-│   └── kustomization.yaml
-└── README.md
+│   └── service.yaml
+├── overlays/
+│   ├── development/
+│   │   └── kustomization.yaml
+│   ├── staging/
+│   │   └── kustomization.yaml
+│   └── production/
+│       └── kustomization.yaml
 ```
+
+### Multi-repo
+
+Separate repos for app and config:
+
+```
+my-app/              # Application code
+├── src/
+├── Dockerfile
+└── .github/workflows/
+
+my-app-config/       # Kubernetes manifests
+├── base/
+└── overlays/
+```
+
+### Comparison
+
+| Aspect | Mono-repo | Multi-repo |
+|--------|-----------|------------|
+| Simplicity | Single repo | Multiple repos |
+| Access control | Harder to separate | Easy to separate |
+| Atomicity | All or nothing | Independent changes |
+| Best for | Small teams | Large organizations |
 
 ---
 
 ## Best Practices
 
-1. **Separate config from code** - App code and K8s manifests in different repos
-2. **Use Kustomize or Helm** - For environment-specific configs
-3. **Enable auto-sync with selfHeal** - Prevents drift
-4. **Use ApplicationSets** - Manage multiple environments
-5. **Implement RBAC** - Control who can sync what
+### Repository Structure
+
+1. **Separate app code from config** - Different change velocity
+2. **Use Kustomize or Helm** - Avoid duplicating manifests
+3. **Keep secrets out of Git** - Use Sealed Secrets or external managers
+
+### Security
+
+1. **Limit cluster access** - Only GitOps operator needs it
+2. **Sign commits** - Verify who made changes
+3. **Protect main branch** - Require reviews
+
+### Operations
+
+1. **Start with non-production** - Test the workflow first
+2. **Use progressive delivery** - Canary/blue-green via GitOps
+3. **Monitor sync status** - Alert on sync failures
+
+### Example Workflow
+
+```
+1. Developer creates PR with manifest changes
+2. CI runs validation (kubeval, kustomize build)
+3. Reviewer approves and merges
+4. GitOps operator detects change
+5. Manifests applied to cluster
+6. Operator reports sync status
+7. Alerts if sync fails
+```
+
+This guide covers GitOps fundamentals with practical examples using ArgoCD and Flux for Kubernetes-native continuous delivery.
