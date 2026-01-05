@@ -654,45 +654,867 @@ HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
 
 ### Multi-Stage Builds
 
-Multi-stage builds create smaller, more secure images:
+Multi-stage builds are one of Docker's most powerful features for creating production-ready container images. They allow you to use multiple FROM statements in a single Dockerfile, where each FROM begins a new stage. You can selectively copy artifacts from one stage to another, leaving behind everything you don't need in the final image.
+
+#### How Multi-Stage Builds Work
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────────┐
+│                     MULTI-STAGE BUILD ARCHITECTURE                                   │
+├─────────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                      │
+│   STAGE 1: Build          STAGE 2: Test           STAGE 3: Production               │
+│   ┌──────────────┐       ┌──────────────┐        ┌──────────────┐                  │
+│   │ FROM node:18 │       │FROM node:18  │        │FROM node:18  │                  │
+│   │              │       │              │        │   -alpine    │                  │
+│   │ Install deps │       │ Copy from    │        │              │                  │
+│   │ Build tools  │──────▶│   builder    │        │ COPY --from  │                  │
+│   │ Compile code │       │              │        │   =builder   │                  │
+│   │              │       │ Run tests    │        │   /app/dist  │                  │
+│   │ Size: 1.2GB  │       │              │        │              │                  │
+│   └──────────────┘       │ Size: 1.3GB  │        │ Only runtime │                  │
+│         │                └──────────────┘        │              │                  │
+│         │                       │                │ Size: 150MB  │                  │
+│         │                       │                └──────────────┘                  │
+│         └───────────────────────┴────────────────────────▶                          │
+│                                                                                      │
+│   Only the FINAL stage becomes the image!                                           │
+│   Previous stages are discarded (but cached for rebuilds)                          │
+│                                                                                      │
+└─────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+#### Key Benefits
+
+**1. Dramatically Smaller Images**
+- Remove build tools, compilers, and intermediate artifacts
+- Production images contain only runtime dependencies
+- 10x-100x size reduction is common
+
+**2. Enhanced Security**
+- No build tools in production images = smaller attack surface
+- Reduced vulnerability exposure
+- Separation of build-time and runtime secrets
+
+**3. Improved Build Performance**
+- Docker caches each stage independently
+- Rebuilds only what changed
+- Parallel builds of independent stages
+
+**4. Cleaner Dockerfiles**
+- One file for all environments (build, test, production)
+- No need for complex build scripts
+- Self-documenting build process
+
+#### Example 1: Node.js/TypeScript Application
+
+From development to production-ready in one Dockerfile:
 
 ```dockerfile
-# ─────────────────────────────────────────────────────────────────────────────
-# MULTI-STAGE BUILD EXAMPLE
-# ─────────────────────────────────────────────────────────────────────────────
+# ═════════════════════════════════════════════════════════════════════════════
+# Stage 1: Dependencies (cached layer for node_modules)
+# ═════════════════════════════════════════════════════════════════════════════
+FROM node:18 AS dependencies
 
-# Stage 1: Build environment (large, has build tools)
-FROM node:18 AS builder
 WORKDIR /app
-COPY package*.json ./
-RUN npm ci
-COPY . .
-RUN npm run build
-# Result: /app/dist contains compiled code
 
-# Stage 2: Production environment (small, runtime only)
+# Copy only package files to leverage cache
+COPY package.json package-lock.json ./
+
+# Install ALL dependencies (including devDependencies)
+RUN npm ci
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Stage 2: Builder (compile TypeScript to JavaScript)
+# ═════════════════════════════════════════════════════════════════════════════
+FROM node:18 AS builder
+
+WORKDIR /app
+
+# Copy dependencies from previous stage
+COPY --from=dependencies /app/node_modules ./node_modules
+
+# Copy source code
+COPY . .
+
+# Build the application (TypeScript → JavaScript)
+RUN npm run build
+
+# TypeScript files, test files, and configs are now in dist/
+# But we also have node_modules with devDependencies we don't need
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Stage 3: Production Dependencies (only runtime dependencies)
+# ═════════════════════════════════════════════════════════════════════════════
+FROM node:18 AS prod-dependencies
+
+WORKDIR /app
+
+COPY package.json package-lock.json ./
+
+# Install ONLY production dependencies (no devDependencies)
+RUN npm ci --only=production
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Stage 4: Production (minimal runtime image)
+# ═════════════════════════════════════════════════════════════════════════════
 FROM node:18-alpine AS production
+
 WORKDIR /app
 
 # Create non-root user
 RUN addgroup -S appgroup && adduser -S appuser -G appgroup
 
-# Only copy what we need from build stage
+# Copy only production dependencies
+COPY --from=prod-dependencies /app/node_modules ./node_modules
+
+# Copy only the compiled JavaScript (not TypeScript source)
 COPY --from=builder /app/dist ./dist
-COPY --from=builder /app/node_modules ./node_modules
-COPY package*.json ./
+
+# Copy runtime config files
+COPY package.json ./
 
 # Switch to non-root user
 USER appuser
 
+# Document exposed port
+EXPOSE 3000
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+    CMD node -e "require('http').get('http://localhost:3000/health', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"
+
+# Start the application
+CMD ["node", "dist/server.js"]
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Size Comparison:
+# ─────────────────────────────────────────────────────────────────────────────
+# Single-stage with node:18        : ~1,200 MB  (includes TS compiler, devDeps)
+# Multi-stage with node:18-alpine  :   ~150 MB  (only runtime + compiled code)
+# Reduction                         :   ~88%    (8x smaller!)
+# ═════════════════════════════════════════════════════════════════════════════
+```
+
+#### Example 2: Python/Flask Application
+
+Separating compilation from runtime for Python packages:
+
+```dockerfile
+# ═════════════════════════════════════════════════════════════════════════════
+# Stage 1: Builder (compile dependencies with native extensions)
+# ═════════════════════════════════════════════════════════════════════════════
+FROM python:3.11 AS builder
+
+WORKDIR /app
+
+# Install build dependencies for compiling Python packages
+RUN apt-get update && apt-get install -y \
+    gcc \
+    g++ \
+    build-essential \
+    libpq-dev \
+    libffi-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy requirements
+COPY requirements.txt .
+
+# Install dependencies to a specific directory
+# Using --prefix to install to /install directory
+RUN pip install --prefix=/install --no-cache-dir -r requirements.txt
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Stage 2: Production (minimal runtime environment)
+# ═════════════════════════════════════════════════════════════════════════════
+FROM python:3.11-slim AS production
+
+WORKDIR /app
+
+# Install only runtime dependencies (not build tools)
+RUN apt-get update && apt-get install -y \
+    libpq5 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy installed packages from builder
+COPY --from=builder /install /usr/local
+
+# Create non-root user
+RUN useradd --create-home --shell /bin/bash appuser
+
+# Copy application code
+COPY --chown=appuser:appuser . .
+
+# Switch to non-root user
+USER appuser
+
+# Set Python to run in unbuffered mode (better for Docker logs)
+ENV PYTHONUNBUFFERED=1
+
+EXPOSE 5000
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
+    CMD python -c "import requests; requests.get('http://localhost:5000/health')"
+
+CMD ["python", "-m", "flask", "run", "--host=0.0.0.0"]
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Size Comparison:
+# ─────────────────────────────────────────────────────────────────────────────
+# Single-stage with python:3.11     :   ~1,000 MB  (includes gcc, g++, etc.)
+# Multi-stage with python:3.11-slim :     ~200 MB  (only runtime libraries)
+# Reduction                          :     ~80%    (5x smaller!)
+# ═════════════════════════────────════════════════════════════════════════════
+```
+
+#### Example 3: Go Application (Extreme Size Reduction)
+
+Go compiles to a single static binary, enabling the smallest possible images:
+
+```dockerfile
+# ═════════════════════════════════════════════════════════════════════════════
+# Stage 1: Builder (compile Go binary)
+# ═════════════════════════════════════════════════════════════════════════════
+FROM golang:1.21-alpine AS builder
+
+WORKDIR /app
+
+# Install git (needed for go modules)
+RUN apk add --no-cache git ca-certificates
+
+# Copy go mod files
+COPY go.mod go.sum ./
+
+# Download dependencies (cached if go.mod hasn't changed)
+RUN go mod download
+
+# Copy source code
+COPY . .
+
+# Build the binary
+# CGO_ENABLED=0 creates a fully static binary (no C dependencies)
+# -ldflags="-w -s" strips debug information for smaller binary
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
+    -ldflags="-w -s" \
+    -o /app/server \
+    ./cmd/server
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Stage 2: Production (scratch - absolutely minimal)
+# ═════════════════════════════════════════════════════════════════════════════
+FROM scratch AS production
+
+# Copy CA certificates for HTTPS requests
+COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
+
+# Copy the binary (this is ALL we need!)
+COPY --from=builder /app/server /server
+
+# Copy any static files if needed
+# COPY --from=builder /app/static /static
+
+# Document port
+EXPOSE 8080
+
+# No shell, no package manager, no utilities - just our binary
+# This is as minimal as it gets!
+ENTRYPOINT ["/server"]
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Size Comparison:
+# ─────────────────────────────────────────────────────────────────────────────
+# Single-stage with golang:1.21      :   ~800 MB  (Go toolchain + stdlib)
+# Multi-stage with scratch           :    ~10 MB  (just the compiled binary!)
+# Reduction                           :   ~98%    (80x smaller!)
+# ═════════════════════════════════════════════════════════════════════════════
+#
+# Note: If you need a shell for debugging, use alpine instead of scratch:
+# FROM alpine:3.18
+# RUN apk add --no-cache ca-certificates
+# ...
+# This adds ~5MB but gives you a shell and basic tools
+# ═════════════════════════════════════════════════════════════════════════════
+```
+
+#### Example 4: Java/Spring Boot Application
+
+Maven/Gradle builds produce large artifacts; multi-stage builds keep only what's needed:
+
+```dockerfile
+# ═════════════════════════════════════════════════════════════════════════════
+# Stage 1: Dependencies (cache Maven dependencies separately)
+# ═════════════════════════════════════════════════════════════════════════════
+FROM maven:3.9-eclipse-temurin-17 AS dependencies
+
+WORKDIR /app
+
+# Copy only POM file to cache dependencies
+COPY pom.xml .
+
+# Download dependencies (cached if pom.xml hasn't changed)
+RUN mvn dependency:go-offline -B
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Stage 2: Builder (compile and package application)
+# ═════════════════════════════════════════════════════════════════════════════
+FROM maven:3.9-eclipse-temurin-17 AS builder
+
+WORKDIR /app
+
+# Copy dependencies from previous stage
+COPY --from=dependencies /root/.m2 /root/.m2
+
+# Copy source code
+COPY pom.xml .
+COPY src ./src
+
+# Build the application (skip tests in build, run them separately)
+RUN mvn clean package -DskipTests -B
+
+# The JAR file is now in target/*.jar
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Stage 3: Production (JRE only, no JDK or Maven)
+# ═════════════════════════════════════════════════════════════════════════════
+FROM eclipse-temurin:17-jre-alpine AS production
+
+WORKDIR /app
+
+# Create non-root user
+RUN addgroup -S spring && adduser -S spring -G spring
+
+# Copy only the JAR file from builder
+COPY --from=builder /app/target/*.jar app.jar
+
+# Switch to non-root user
+USER spring
+
+EXPOSE 8080
+
+# Health check using Spring Boot Actuator
+HEALTHCHECK --interval=30s --timeout=3s --start-period=30s --retries=3 \
+    CMD wget --no-verbose --tries=1 --spider http://localhost:8080/actuator/health || exit 1
+
+# Run the application
+ENTRYPOINT ["java", "-jar", "app.jar"]
+
+# Optional: JVM tuning for containers
+# ENTRYPOINT ["java", "-XX:+UseContainerSupport", "-XX:MaxRAMPercentage=75.0", "-jar", "app.jar"]
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Size Comparison:
+# ─────────────────────────────────────────────────────────────────────────────
+# Single-stage with Maven + JDK     :  ~850 MB  (Maven + JDK + .m2 cache)
+# Multi-stage with JRE-alpine       :  ~200 MB  (JRE + JAR only)
+# Reduction                          :  ~76%    (4x smaller!)
+# ═════════════════════════════════════════════════════════════════════════════
+```
+
+#### Example 5: React/TypeScript Frontend
+
+Building static assets and serving with nginx:
+
+```dockerfile
+# ═════════════════════════════════════════════════════════════════════════════
+# Stage 1: Dependencies
+# ═════════════════════════════════════════════════════════════════════════════
+FROM node:18 AS dependencies
+
+WORKDIR /app
+
+COPY package.json package-lock.json ./
+RUN npm ci
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Stage 2: Builder (build React app)
+# ═════════════════════════════════════════════════════════════════════════════
+FROM node:18 AS builder
+
+WORKDIR /app
+
+# Copy dependencies
+COPY --from=dependencies /app/node_modules ./node_modules
+
+# Copy source
+COPY . .
+
+# Build production bundle
+# This creates optimized static files in /app/build
+ENV NODE_ENV=production
+RUN npm run build
+
+# Result: build/ contains HTML, CSS, JS bundles
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Stage 3: Production (nginx to serve static files)
+# ═════════════════════════════════════════════════════════════════════════════
+FROM nginx:1.25-alpine AS production
+
+# Copy custom nginx configuration
+COPY nginx.conf /etc/nginx/nginx.conf
+
+# Copy built static files from builder
+# nginx serves files from /usr/share/nginx/html by default
+COPY --from=builder /app/build /usr/share/nginx/html
+
+# Add custom error pages
+COPY error-pages/ /usr/share/nginx/html/errors/
+
+# Create non-root user (nginx alpine runs as nginx user by default)
+# Just verify it exists
+RUN id nginx
+
+EXPOSE 80
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+    CMD wget --no-verbose --tries=1 --spider http://localhost/health || exit 1
+
+# nginx.conf should be configured to run as non-root
+CMD ["nginx", "-g", "daemon off;"]
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Size Comparison:
+# ─────────────────────────────────────────────────────────────────────────────
+# Single-stage with node:18          :  ~1,200 MB  (Node + npm + build tools)
+# Multi-stage with nginx:alpine      :     ~40 MB  (nginx + static files only)
+# Reduction                           :    ~96%    (30x smaller!)
+# ═════════════════════════════────════════════════════════════════════════════
+```
+
+#### Example 6: Monorepo with Multiple Services
+
+Building multiple services from a monorepo, sharing common stages:
+
+```dockerfile
+# ═════════════════════════════════════════════════════════════════════════════
+# Stage 1: Base dependencies (shared by all services)
+# ═════════════════════════════════════════════════════════════════════════════
+FROM node:18 AS base
+
+WORKDIR /app
+
+# Copy root package files
+COPY package.json package-lock.json ./
+COPY packages/shared/package.json ./packages/shared/
+
+# Install all dependencies
+RUN npm ci
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Stage 2: Build shared library
+# ═════════════════════════════════════════════════════════════════════════════
+FROM base AS shared-builder
+
+COPY packages/shared ./packages/shared
+RUN cd packages/shared && npm run build
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Stage 3: Build API service
+# ═════════════════════════════════════════════════════════════════════════════
+FROM base AS api-builder
+
+# Copy built shared library
+COPY --from=shared-builder /app/packages/shared/dist ./packages/shared/dist
+
+# Copy and build API service
+COPY packages/api ./packages/api
+RUN cd packages/api && npm run build
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Stage 4: Build Web service
+# ═════════════════════════════════════════════════════════════════════════════
+FROM base AS web-builder
+
+# Copy built shared library
+COPY --from=shared-builder /app/packages/shared/dist ./packages/shared/dist
+
+# Copy and build Web service
+COPY packages/web ./packages/web
+RUN cd packages/web && npm run build
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Stage 5: API Production (can be built with --target api-production)
+# ═════════════════════════════════════════════════════════════════════════════
+FROM node:18-alpine AS api-production
+
+WORKDIR /app
+
+RUN addgroup -S appgroup && adduser -S appuser -G appgroup
+
+# Copy only API artifacts
+COPY --from=api-builder /app/packages/api/dist ./dist
+COPY --from=api-builder /app/packages/shared/dist ./shared
+COPY --from=base /app/node_modules ./node_modules
+
+USER appuser
 EXPOSE 3000
 CMD ["node", "dist/server.js"]
 
+# ═════════════════════════════════════════════════════════════════════════════
+# Stage 6: Web Production (can be built with --target web-production)
+# ═════════════════════════════════════════════════════════════════════════════
+FROM nginx:1.25-alpine AS web-production
+
+# Copy only Web static files
+COPY --from=web-builder /app/packages/web/build /usr/share/nginx/html
+COPY nginx.conf /etc/nginx/nginx.conf
+
+EXPOSE 80
+CMD ["nginx", "-g", "daemon off;"]
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Build specific services using --target:
 # ─────────────────────────────────────────────────────────────────────────────
-# Size comparison:
-# - Single stage with node:18: ~900MB
-# - Multi-stage with node:18-alpine: ~150MB
-# ─────────────────────────────────────────────────────────────────────────────
+# docker build --target api-production -t myapp-api .
+# docker build --target web-production -t myapp-web .
+# ═════════════════════════════════════════════════════════════════════════════
+```
+
+#### Advanced Patterns
+
+**1. Using the `--target` Flag**
+
+Build only a specific stage for testing or deployment:
+
+```bash
+# Build only the builder stage (for testing build process)
+docker build --target builder -t myapp:builder .
+
+# Build only production stage (default)
+docker build --target production -t myapp:latest .
+
+# Build test stage with different configurations
+docker build --target test --build-arg ENV=staging -t myapp:test .
+```
+
+**2. Copying from External Images**
+
+You can copy files from any image, not just previous stages:
+
+```dockerfile
+# Copy nginx configuration from official nginx image
+FROM scratch AS production
+COPY --from=nginx:1.25 /etc/nginx/nginx.conf /etc/nginx/
+
+# Copy certificates from a specific image
+COPY --from=alpine:latest /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
+
+# Copy binaries from tool images
+COPY --from=hashicorp/terraform:latest /bin/terraform /usr/local/bin/
+```
+
+**3. Named Stages as Build Arguments**
+
+Make stages flexible with build arguments:
+
+```dockerfile
+ARG PYTHON_VERSION=3.11
+FROM python:${PYTHON_VERSION} AS builder
+
+ARG BASE_IMAGE=python:3.11-slim
+FROM ${BASE_IMAGE} AS production
+
+# Build with: docker build --build-arg PYTHON_VERSION=3.10 .
+```
+
+**4. Layer Caching Strategies**
+
+Understanding cache behavior with multi-stage builds:
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────────┐
+│                     MULTI-STAGE BUILD CACHING                                        │
+├─────────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                      │
+│   First Build (all layers built):                                                   │
+│   ┌──────────────────────────────────────────────────────────────┐                  │
+│   │ Stage 1: dependencies                                         │                  │
+│   │   FROM node:18                           [PULL]    5 sec     │                  │
+│   │   COPY package.json                      [BUILD]   1 sec     │                  │
+│   │   RUN npm ci                             [BUILD]  45 sec     │  Cache layer A   │
+│   ├──────────────────────────────────────────────────────────────┤                  │
+│   │ Stage 2: builder                                              │                  │
+│   │   FROM node:18                           [CACHE]   0 sec     │                  │
+│   │   COPY --from=dependencies               [BUILD]   2 sec     │                  │
+│   │   COPY src/                              [BUILD]   1 sec     │                  │
+│   │   RUN npm run build                      [BUILD]  30 sec     │  Cache layer B   │
+│   ├──────────────────────────────────────────────────────────────┤                  │
+│   │ Stage 3: production                                           │                  │
+│   │   FROM node:18-alpine                    [PULL]    3 sec     │                  │
+│   │   COPY --from=builder /app/dist          [BUILD]   1 sec     │  Cache layer C   │
+│   └──────────────────────────────────────────────────────────────┘                  │
+│                                                                                      │
+│   Second Build (code changed, package.json same):                                   │
+│   ┌──────────────────────────────────────────────────────────────┐                  │
+│   │ Stage 1: dependencies                                         │                  │
+│   │   FROM node:18                           [CACHE]   0 sec  ✓  │                  │
+│   │   COPY package.json                      [CACHE]   0 sec  ✓  │                  │
+│   │   RUN npm ci                             [CACHE]   0 sec  ✓  │  Use layer A     │
+│   ├──────────────────────────────────────────────────────────────┤                  │
+│   │ Stage 2: builder                                              │                  │
+│   │   FROM node:18                           [CACHE]   0 sec  ✓  │                  │
+│   │   COPY --from=dependencies               [CACHE]   0 sec  ✓  │                  │
+│   │   COPY src/                              [BUILD]   1 sec  ⚠  │  Changed!        │
+│   │   RUN npm run build                      [BUILD]  30 sec     │  Rebuild         │
+│   ├──────────────────────────────────────────────────────────────┤                  │
+│   │ Stage 3: production                                           │                  │
+│   │   FROM node:18-alpine                    [CACHE]   0 sec  ✓  │                  │
+│   │   COPY --from=builder /app/dist          [BUILD]   1 sec     │  New artifacts   │
+│   └──────────────────────────────────────────────────────────────┘                  │
+│                                                                                      │
+│   Build time: First: ~88s, Second: ~32s (64% faster!)                              │
+│                                                                                      │
+└─────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+**5. Build-Time vs Runtime Dependencies**
+
+Clear separation improves security and size:
+
+```dockerfile
+# ═════════════════════════════════════════════════════════════════════════════
+# BUILD-TIME DEPENDENCIES (only in builder stage)
+# ═════════════════════════════════════════════════════════════════════════════
+# - Compilers (gcc, g++, javac, tsc)
+# - Build tools (maven, gradle, webpack, npm)
+# - Development headers (libpq-dev, python-dev)
+# - Testing frameworks (jest, pytest)
+# - Linters and formatters
+# - Documentation generators
+
+# ═════════════════════════════════════════════════════════════════════════════
+# RUNTIME DEPENDENCIES (in production stage)
+# ═════════════════════════════════════════════════════════════════════════════
+# - Runtime libraries (libpq5, not libpq-dev)
+# - Application runtime (node, python, java)
+# - Compiled artifacts (binaries, JARs, bundles)
+# - Configuration files
+# - Static assets
+
+FROM python:3.11 AS builder
+# Build-time: includes gcc, python3-dev for compiling packages
+RUN pip install psycopg2  # Requires compilation
+
+FROM python:3.11-slim AS production
+# Runtime: only needs libpq5 (runtime library, not headers)
+RUN apt-get update && apt-get install -y libpq5
+COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/
+```
+
+#### Best Practices for Multi-Stage Builds
+
+**1. Stage Ordering for Optimal Caching**
+
+```dockerfile
+# ✅ GOOD: Order stages from least to most frequently changed
+FROM node:18 AS dependencies
+# Changes rarely
+COPY package.json package-lock.json ./
+RUN npm ci
+
+FROM node:18 AS builder  
+# Changes occasionally
+COPY --from=dependencies /app/node_modules ./node_modules
+COPY tsconfig.json ./
+
+# Changes frequently
+COPY src/ ./src/
+RUN npm run build
+
+# ❌ BAD: Mixing concerns invalidates cache unnecessarily
+FROM node:18 AS builder
+COPY . .  # Everything! Any file change invalidates cache
+RUN npm ci && npm run build
+```
+
+**2. Use Specific Stage Names**
+
+```dockerfile
+# ✅ GOOD: Descriptive names make Dockerfile self-documenting
+FROM node:18 AS dependencies
+FROM node:18 AS builder
+FROM node:18 AS tester
+FROM node:18-alpine AS production
+
+# ❌ BAD: Generic names
+FROM node:18 AS stage1
+FROM node:18 AS stage2
+```
+
+**3. Minimize Layer Count in Final Stage**
+
+```dockerfile
+# ✅ GOOD: Few layers in production
+FROM alpine:3.18 AS production
+COPY --from=builder /app/binary /app/
+COPY --from=builder /app/config /config/
+# Only 2 layers added
+
+# ❌ BAD: Many unnecessary layers
+FROM alpine:3.18 AS production
+RUN apk add ca-certificates
+RUN mkdir /app
+COPY --from=builder /app/binary /app/
+RUN chmod +x /app/binary
+# 4 layers when 2 would suffice
+```
+
+#### When to Use Multi-Stage Builds
+
+**✅ Use Multi-Stage Builds When:**
+
+- Compiling code (Go, Java, TypeScript, C++)
+- Building static sites (React, Vue, Angular)
+- Application needs build tools not required at runtime
+- Creating minimal production images
+- Separating test and production environments
+- Working with multiple programming languages in one image
+
+**❌ Don't Use Multi-Stage Builds When:**
+
+- Interpreted languages with no build step (simple Python/Ruby scripts)
+- Image is already minimal (copying from scratch to scratch)
+- Build process is trivial (just copying files)
+- Debugging and you need build tools in production (temporarily)
+
+#### Common Pitfalls and Solutions
+
+**Pitfall 1: File Permissions**
+
+```dockerfile
+# ❌ PROBLEM: Files copied have root ownership
+COPY --from=builder /app/dist ./dist
+USER appuser  # Can't write to dist/
+
+# ✅ SOLUTION: Use --chown flag
+COPY --from=builder --chown=appuser:appuser /app/dist ./dist
+USER appuser
+```
+
+**Pitfall 2: Missing Runtime Dependencies**
+
+```dockerfile
+# ❌ PROBLEM: Forgot runtime libraries
+FROM python:3.11-slim
+COPY --from=builder /app/env /app/env
+CMD ["python", "app.py"]  # ImportError: libpq.so.5
+
+# ✅ SOLUTION: Install runtime deps
+FROM python:3.11-slim
+RUN apt-get update && apt-get install -y libpq5
+COPY --from=builder /app/env /app/env
+```
+
+**Pitfall 3: Unnecessary Files in Final Image**
+
+```dockerfile
+# ❌ PROBLEM: Copying too much
+COPY --from=builder /app ./app  # Includes tests, docs, temp files
+
+# ✅ SOLUTION: Copy only what's needed
+COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/config ./config
+```
+
+**Pitfall 4: Not Using .dockerignore**
+
+```bash
+# ❌ PROBLEM: Copying unnecessary files to builder
+# COPY . . copies node_modules, .git, test files
+
+# ✅ SOLUTION: Create .dockerignore
+cat > .dockerignore <<EOF
+node_modules
+.git
+*.log
+.env
+test/
+docs/
+*.md
+EOF
+```
+
+#### Debugging Multi-Stage Builds
+
+**1. Build Specific Stage**
+
+```bash
+# Build and inspect builder stage
+docker build --target builder -t debug:builder .
+docker run -it debug:builder sh
+
+# Check what files exist
+ls -la /app
+```
+
+**2. Use Build Output**
+
+```bash
+# See detailed build output
+docker build --progress=plain --no-cache .
+
+# See layer sizes
+docker history myimage:latest
+```
+
+**3. Inspect Stage Artifacts**
+
+```dockerfile
+# Add debugging stage
+FROM builder AS debug
+RUN find /app -type f -exec ls -lh {} \;
+RUN du -sh /app/*
+```
+
+**4. Override Entrypoint**
+
+```bash
+# Run production image with shell instead of app
+docker run -it --entrypoint sh myapp:latest
+
+# Check what was copied
+ls -la
+```
+
+#### Size Comparison Summary
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────────┐
+│                IMAGE SIZE REDUCTION WITH MULTI-STAGE BUILDS                          │
+├─────────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                      │
+│   Language/Framework    │  Single-Stage  │  Multi-Stage   │  Reduction              │
+│   ──────────────────────┼────────────────┼────────────────┼──────────────────────   │
+│   Node.js/TypeScript    │    1,200 MB    │     150 MB     │  88% (8x smaller)       │
+│   Python/Flask          │    1,000 MB    │     200 MB     │  80% (5x smaller)       │
+│   Go                    │      800 MB    │      10 MB     │  98% (80x smaller!)     │
+│   Java/Spring Boot      │      850 MB    │     200 MB     │  76% (4x smaller)       │
+│   React/TypeScript      │    1,200 MB    │      40 MB     │  96% (30x smaller!)     │
+│                                                                                      │
+│   Average Reduction: ~88% smaller                                                   │
+│                                                                                      │
+└─────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+#### Performance Comparison
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────────┐
+│                     BUILD TIME WITH CACHING                                          │
+├─────────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                      │
+│   Scenario                      │  First Build  │  Code Change  │  Dep Change       │
+│   ──────────────────────────────┼───────────────┼───────────────┼─────────────────  │
+│   Single-stage (no caching)     │     120s      │     120s      │     120s          │
+│   Single-stage (with caching)   │     120s      │      60s      │     120s          │
+│   Multi-stage (with caching)    │     130s      │      15s      │      80s          │
+│                                                                                      │
+│   Multi-stage is 4x faster for typical code changes!                               │
+│   Slightly slower first build, but much faster iteration                           │
+│                                                                                      │
+└─────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ### Best Practices
