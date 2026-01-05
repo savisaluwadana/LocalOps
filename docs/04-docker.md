@@ -753,7 +753,7 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 
 # Install ONLY production dependencies (no devDependencies)
-RUN npm ci --only=production
+RUN npm ci --omit=dev
 
 # ═════════════════════════════════════════════════════════════════════════════
 # Stage 4: Production (minimal runtime image)
@@ -853,9 +853,9 @@ ENV PYTHONUNBUFFERED=1
 
 EXPOSE 5000
 
-# Health check
+# Health check using standard library (no external dependencies)
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
-    CMD python -c "import requests; requests.get('http://localhost:5000/health')"
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:5000/health')"
 
 CMD ["python", "-m", "flask", "run", "--host=0.0.0.0"]
 
@@ -992,9 +992,12 @@ USER spring
 
 EXPOSE 8080
 
-# Health check using Spring Boot Actuator
+# Health check using Java (no external dependencies needed)
 HEALTHCHECK --interval=30s --timeout=3s --start-period=30s --retries=3 \
-    CMD wget --no-verbose --tries=1 --spider http://localhost:8080/actuator/health || exit 1
+    CMD java -cp app.jar org.springframework.boot.SpringApplication || exit 1
+
+# Or install curl in alpine: RUN apk add --no-cache curl
+# Then use: CMD curl -f http://localhost:8080/actuator/health || exit 1
 
 # Run the application
 ENTRYPOINT ["java", "-jar", "app.jar"]
@@ -1067,9 +1070,9 @@ RUN id nginx
 
 EXPOSE 80
 
-# Health check
+# Health check (curl is available in nginx:alpine by default)
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-    CMD wget --no-verbose --tries=1 --spider http://localhost/health || exit 1
+    CMD curl -f http://localhost/health || exit 1
 
 # nginx.conf should be configured to run as non-root
 CMD ["nginx", "-g", "daemon off;"]
@@ -1486,7 +1489,7 @@ ls -la
 ├─────────────────────────────────────────────────────────────────────────────────────┤
 │                                                                                      │
 │   Language/Framework    │  Single-Stage  │  Multi-Stage   │  Reduction              │
-│   ──────────────────────┼────────────────┼────────────────┼──────────────────────   │
+│   ─────────────────────────────────────────────────────────────────────────────────   │
 │   Node.js/TypeScript    │    1,200 MB    │     150 MB     │  88% (8x smaller)       │
 │   Python/Flask          │    1,000 MB    │     200 MB     │  80% (5x smaller)       │
 │   Go                    │      800 MB    │      10 MB     │  98% (80x smaller!)     │
