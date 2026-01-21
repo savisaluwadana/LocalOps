@@ -1,0 +1,50 @@
+version: '3.8'
+
+services:
+  # ============================================
+  # Registry
+  # ============================================
+  registry:
+    image: registry:2
+    ports:
+      - "5000:5000"
+    environment:
+      REGISTRY_STORAGE_DELETE_ENABLED: "true"
+    volumes:
+      - registry_data:/var/lib/registry
+    networks:
+      - registry
+
+  # ============================================
+  # Registry UI
+  # ============================================
+  registry-ui:
+    image: joxit/docker-registry-ui:latest
+    ports:
+      - "80:80"
+    environment:
+      REGISTRY_TITLE: "Private Image Registry"
+      REGISTRY_URL: http://registry:5000
+      DELETE_IMAGES: "true"
+    depends_on:
+      - registry
+    networks:
+      - registry
+
+  # ============================================
+  # Mock Scanner (Trivy Placeholder)
+  # ============================================
+  scanner:
+    image: fake-service/fake-service:latest
+    environment:
+      MESSAGE: "Scanning images for vulnerabilities... Status: Clean"
+      SERVER_NAME: "Trivy Scanner"
+    networks:
+      - registry
+
+networks:
+  registry:
+    driver: bridge
+
+volumes:
+  registry_data:

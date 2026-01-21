@@ -1,0 +1,19 @@
+version: '3.8'
+
+services:
+  # ============================================
+  # Rancher Server (Management Plane)
+  # ============================================
+  rancher:
+    image: rancher/rancher:latest
+    ports:
+      - "8080:80"
+      - "8443:443"
+    privileged: true
+    restart: unless-stopped
+    networks:
+      - orchestration
+
+networks:
+  orchestration:
+    driver: bridge

@@ -1,0 +1,32 @@
+version: '3.8'
+
+services:
+  # ============================================
+  # Rekor (Transparency Log) - Mock
+  # ============================================
+  rekor:
+    image: fake-service/fake-service:latest
+    environment:
+      MESSAGE: "Rekor Log: TLOG Index 123456"
+      SERVER_NAME: "Rekor"
+    ports:
+      - "3000:80"
+    networks:
+      - supply-chain
+
+  # ============================================
+  # Fulcio (Certificate Authority) - Mock
+  # ============================================
+  fulcio:
+    image: fake-service/fake-service:latest
+    environment:
+      MESSAGE: "Fulcio CA: Issuing Short-lived Certificates"
+      SERVER_NAME: "Fulcio"
+    ports:
+      - "5000:80"
+    networks:
+      - supply-chain
+
+networks:
+  supply-chain:
+    driver: bridge

@@ -1,0 +1,36 @@
+version: '3.8'
+
+services:
+  # ============================================
+  # FinOps Dashboard (Mock)
+  # ============================================
+  finops-dashboard:
+    image: fake-service/fake-service:latest
+    environment:
+      MESSAGE: "FinOps Dashboard: Current Spend $14,203 (+12%)"
+      SERVER_NAME: "FinOps Console"
+    ports:
+      - "8080:80"
+    networks:
+      - finops
+
+  # ============================================
+  # Cost Data Warehouse (Postgres)
+  # ============================================
+  cost-warehouse:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: finops
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: cost_data
+    volumes:
+      - cost_data:/var/lib/postgresql/data
+    networks:
+      - finops
+
+networks:
+  finops:
+    driver: bridge
+
+volumes:
+  cost_data:

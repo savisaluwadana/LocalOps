@@ -1,0 +1,34 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cost-exporter
+  labels:
+    app: cost-exporter
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: cost-exporter
+  template:
+    metadata:
+      labels:
+        app: cost-exporter
+    spec:
+      containers:
+      - name: exporter
+        image: fake-service/fake-service:latest
+        env:
+        - name: MESSAGE
+          value: "Exporting cost data..."
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: cost-exporter
+spec:
+  selector:
+    app: cost-exporter
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 80

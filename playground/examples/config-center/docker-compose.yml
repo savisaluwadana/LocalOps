@@ -1,0 +1,71 @@
+version: '3.8'
+
+services:
+  # ============================================
+  # Feature Flags (Unleash)
+  # ============================================
+  unleash-db:
+    image: postgres:15
+    environment:
+      POSTGRES_DB: unleash
+      POSTGRES_USER: unleash
+      POSTGRES_PASSWORD: password
+    volumes:
+      - unleash_data:/var/lib/postgresql/data
+    networks:
+      - config-center
+    healthcheck:
+      test: ["CMD", "pg_isready", "--username=unleash"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  unleash:
+    image: unleashorg/unleash-server:latest
+    ports:
+      - "4242:4242"
+    environment:
+      DATABASE_HOST: unleash-db
+      DATABASE_NAME: unleash
+      DATABASE_USER: unleash
+      DATABASE_PASSWORD: password
+      DATABASE_SSL: "false"
+    depends_on:
+      unleash-db:
+        condition: service_healthy
+    networks:
+      - config-center
+
+  # ============================================
+  # Secrets Management (Vault)
+  # ============================================
+  vault:
+    image: vault:1.13.3
+    ports:
+      - "8200:8200"
+    environment:
+      VAULT_DEV_ROOT_TOKEN_ID: root
+      VAULT_DEV_LISTEN_ADDRESS: 0.0.0.0:8200
+    cap_add:
+      - IPC_LOCK
+    networks:
+      - config-center
+
+  # ============================================
+  # Demo Application
+  # ============================================
+  demo-app:
+    image: fake-service/fake-service:latest
+    environment:
+      MESSAGE: "I am controlled by feature flags!"
+      SERVER_NAME: "Demo App"
+      # In a real app, we would inject UNLEASH_URL and VAULT_ADDR here
+    networks:
+      - config-center
+
+networks:
+  config-center:
+    driver: bridge
+
+volumes:
+  unleash_data:

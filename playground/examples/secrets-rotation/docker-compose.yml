@@ -1,0 +1,44 @@
+version: '3.8'
+
+services:
+  # ============================================
+  # Vault (Secrets Engine)
+  # ============================================
+  vault:
+    image: vault:1.13.3
+    ports:
+      - "8200:8200"
+    environment:
+      VAULT_DEV_ROOT_TOKEN_ID: root
+      VAULT_DEV_LISTEN_ADDRESS: 0.0.0.0:8200
+    cap_add:
+      - IPC_LOCK
+    networks:
+      - secrets
+
+  # ============================================
+  # Postgres (Target for rotation)
+  # ============================================
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: app_db
+    networks:
+      - secrets
+
+  # ============================================
+  # Rotation Agent (Mock)
+  # ============================================
+  rotation-agent:
+    image: fake-service/fake-service:latest
+    environment:
+      MESSAGE: "Secrets Rotation Agent: Monitoring Vault Leases..."
+      VAULT_ADDR: "http://vault:8200"
+    networks:
+      - secrets
+
+networks:
+  secrets:
+    driver: bridge

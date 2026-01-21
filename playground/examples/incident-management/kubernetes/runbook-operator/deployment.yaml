@@ -1,0 +1,20 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: runbook-operator
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: runbook-operator
+  template:
+    metadata:
+      labels:
+        app: runbook-operator
+    spec:
+      containers:
+      - name: operator
+        image: fake-service/fake-service:latest
+        env:
+        - name: MESSAGE
+          value: "Runbook Operator: Ready to execute remediation plans"

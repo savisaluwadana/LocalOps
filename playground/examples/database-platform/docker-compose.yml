@@ -1,0 +1,43 @@
+version: '3.8'
+
+services:
+  # ============================================
+  # PostgreSQL Cluster Primary
+  # ============================================
+  postgres-primary:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: orders
+    ports:
+      - "5432:5432"
+    networks:
+      - db-platform
+
+  # ============================================
+  # Percona PMM (Monitoring) - Mock
+  # ============================================
+  pmm-server:
+    image: fake-service/fake-service:latest
+    environment:
+      MESSAGE: "Percona Monitoring and Management (PMM): Database Health 100%"
+      SERVER_NAME: "PMM Server"
+    ports:
+      - "8080:80"
+    networks:
+      - db-platform
+
+  # ============================================
+  # Redis
+  # ============================================
+  redis:
+    image: redis:alpine
+    ports:
+      - "6379:6379"
+    networks:
+      - db-platform
+
+networks:
+  db-platform:
+    driver: bridge
