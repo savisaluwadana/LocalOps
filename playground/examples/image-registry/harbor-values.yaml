@@ -1,0 +1,15 @@
+expose:
+  type: loadBalancer
+  tls:
+    enabled: true
+    certSource: auto
+persistence:
+  persistentVolumeClaim:
+    registry:
+      size: 100Gi
+    chartmuseum:
+      size: 10Gi
+trivy:
+  enabled: true
+notary:
+  enabled: true

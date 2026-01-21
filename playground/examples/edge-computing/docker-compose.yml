@@ -1,0 +1,32 @@
+version: '3.8'
+
+services:
+  # ============================================
+  # MQTT Broker (Mosquitto)
+  # ============================================
+  mqtt-broker:
+    image: eclipse-mosquitto:latest
+    ports:
+      - "1883:1883"
+      - "9001:9001"
+    volumes:
+      - ./mosquitto.conf:/mosquitto/config/mosquitto.conf
+    networks:
+      - edge
+
+  # ============================================
+  # IoT Device Simulator (Edge Node)
+  # ============================================
+  device-simulator:
+    image: fake-service/fake-service:latest
+    environment:
+      MESSAGE: "Sending Telemetry: {temp: 23.5, humidity: 60}"
+      UPSTREAM_URIS: "tcp://mqtt-broker:1883"
+    depends_on:
+      - mqtt-broker
+    networks:
+      - edge
+
+networks:
+  edge:
+    driver: bridge

@@ -1,0 +1,22 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: inference-engine
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: inference
+  template:
+    metadata:
+      labels:
+        app: inference
+    spec:
+      nodeSelector:
+        role: edge
+      containers:
+      - name: model
+        image: fake-service/fake-service:latest
+        env:
+        - name: MESSAGE
+          value: "Running Inference on Edge Node"

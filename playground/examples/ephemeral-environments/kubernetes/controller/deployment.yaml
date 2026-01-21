@@ -1,0 +1,20 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ephemeral-controller
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ephemeral-controller
+  template:
+    metadata:
+      labels:
+        app: ephemeral-controller
+    spec:
+      containers:
+      - name: controller
+        image: fake-service/fake-service:latest
+        env:
+        - name: MESSAGE
+          value: "Ephemeral Environment Controller: Watching PRs..."

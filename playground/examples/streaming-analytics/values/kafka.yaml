@@ -1,0 +1,5 @@
+ replicaCount: 1
+ persistence:
+   size: 5Gi
+ zookeeper:
+   enabled: true

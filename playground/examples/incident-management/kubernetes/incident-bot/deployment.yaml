@@ -1,0 +1,23 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: incident-bot
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: incident-bot
+  template:
+    metadata:
+      labels:
+        app: incident-bot
+    spec:
+      containers:
+      - name: bot
+        image: fake-service/fake-service:latest
+        env:
+        - name: PAGERDUTY_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: pagerduty-secrets
+              key: token

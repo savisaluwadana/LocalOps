@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+  annotations:
+    reloader.stakater.com/auto: "true"
+data:
+  APP_LOG_LEVEL: "INFO"
+  APP_CACHE_TTL: "300"
+  APP_RATE_LIMIT: "100"
+  FEATURE_NEW_UI: "true"

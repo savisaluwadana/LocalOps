@@ -1,0 +1,42 @@
+version: '3.8'
+
+services:
+  # ============================================
+  # Open Policy Agent (OPA)
+  # ============================================
+  opa:
+    image: openpolicyagent/opa:latest
+    ports:
+      - "8181:8181"
+    command:
+      - "run"
+      - "--server"
+      - "--addr=0.0.0.0:8181"
+    networks:
+      - compliance
+
+  # ============================================
+  # Auditor Dashboard (Mock)
+  # ============================================
+  auditor-dashboard:
+    image: fake-service/fake-service:latest
+    environment:
+      MESSAGE: "Compliance Dashboard - Status: All Systems Go"
+      SERVER_NAME: "Auditor Portal"
+    ports:
+      - "9000:80"
+    networks:
+      - compliance
+
+  # ============================================
+  # Compliance Engine
+  # ============================================
+  compliance-engine:
+    image: curlimages/curl:latest
+    command: /bin/sh -c "while true; do echo 'Checking compliane...'; sleep 30; done"
+    networks:
+      - compliance
+
+networks:
+  compliance:
+    driver: bridge

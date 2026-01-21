@@ -1,0 +1,8 @@
+apiVersion: edge.k8s.io/v1alpha1
+kind: EdgeJoin
+metadata:
+  name: edge-node-1
+spec:
+  nodeName: edge-node-1
+  token: xxxx-token-xxxx
+  server: https://management-cluster:6443

@@ -1,0 +1,9 @@
+apiVersion: preview.io/v1alpha1
+kind: PreviewEnvironment
+metadata:
+  name: manual-test-env
+spec:
+  ttl: 24h
+  application:
+    image: myapp:v2
+    replicas: 1
