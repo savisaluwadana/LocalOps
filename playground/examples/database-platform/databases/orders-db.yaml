@@ -1,0 +1,21 @@
+apiVersion: "acid.zalan.do/v1"
+kind: postgresql
+metadata:
+  name: orders-db
+spec:
+  teamId: "orders-team"
+  volume:
+    size: 2Gi
+  numberOfInstances: 2
+  users:
+    app_user:
+      - superuser
+      - createdb
+  databases:
+    orders: app_user
+  postgresql:
+    version: "15"
+  resources:
+    requests:
+      cpu: 100m
+      memory: 512Mi
